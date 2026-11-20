@@ -61,8 +61,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v1.0.${GITHUB_RUN_NUMBER}"
+          TAG="v1.1.${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" \
             app/build/outputs/apk/debug/qishui-ad-helper-debug.apk \
-            --title "畅听自动化助手 Debug APK (Build #${GITHUB_RUN_NUMBER})" \
-            --notes "自动构建完成：直接点击下方 \`qishui-ad-helper-debug.apk\` 下载到 Android 11+ 手机安装即可。" || true
+            --title "畅听自动化助手 v1.1 Debug APK (Build #${GITHUB_RUN_NUMBER})" \
+            --notes "v1.1 升级版（基于 GitHub 开源实测规则重构：自动切底栏【福利】->【领时长】、多窗口穿透、直播间秒退与【退出不看了】确认、悬浮窗就地启动）：直接点击下方 \`qishui-ad-helper-debug.apk\` 下载安装（支持直接覆盖安装旧版）。" || true

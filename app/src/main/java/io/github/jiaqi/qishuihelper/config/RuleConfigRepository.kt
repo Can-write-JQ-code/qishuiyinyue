@@ -7,6 +7,18 @@ class RuleConfigRepository(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    init {
+        migrateIfNeeded()
+    }
+
+    private fun migrateIfNeeded() {
+        val savedVersion = prefs.getInt(KEY_SCHEMA_VERSION, 1)
+        if (savedVersion < CURRENT_SCHEMA_VERSION) {
+            // 升级到 v2 规则集：自动补齐「福利中心 -> 领时长 / 领取奖励」等真实界面关键词
+            prefs.edit().clear().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
+        }
+    }
+
     fun load(): RuleConfig {
         val defaults = RuleConfig()
         return RuleConfig(
@@ -14,7 +26,7 @@ class RuleConfigRepository(context: Context) {
                 ?.trim()
                 ?.ifEmpty { defaults.targetPackage }
                 ?: defaults.targetPackage,
-            maxRounds = prefs.getInt(KEY_MAX_ROUNDS, defaults.maxRounds).coerceIn(1, 5),
+            maxRounds = prefs.getInt(KEY_MAX_ROUNDS, defaults.maxRounds).coerceIn(1, 10),
             singleAdTimeoutSec = prefs.getInt(KEY_SINGLE_TIMEOUT, defaults.singleAdTimeoutSec).coerceIn(45, 120),
             autoMuteMedia = prefs.getBoolean(KEY_AUTO_MUTE, defaults.autoMuteMedia),
             entryKeywords = parsePipeList(prefs.getString(KEY_ENTRY_KEYWORDS, null), defaults.entryKeywords),
@@ -27,8 +39,9 @@ class RuleConfigRepository(context: Context) {
 
     fun save(config: RuleConfig) {
         prefs.edit()
+            .putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
             .putString(KEY_TARGET_PACKAGE, config.targetPackage.trim().ifEmpty { RuleConfig.DEFAULT_TARGET_PACKAGE })
-            .putInt(KEY_MAX_ROUNDS, config.maxRounds.coerceIn(1, 5))
+            .putInt(KEY_MAX_ROUNDS, config.maxRounds.coerceIn(1, 10))
             .putInt(KEY_SINGLE_TIMEOUT, config.singleAdTimeoutSec.coerceIn(45, 120))
             .putBoolean(KEY_AUTO_MUTE, config.autoMuteMedia)
             .putString(KEY_ENTRY_KEYWORDS, joinPipeList(config.entryKeywords))
@@ -40,12 +53,14 @@ class RuleConfigRepository(context: Context) {
     }
 
     fun resetToDefault(): RuleConfig {
-        prefs.edit().clear().apply()
+        prefs.edit().clear().putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
         return RuleConfig()
     }
 
     companion object {
         private const val PREFS_NAME = "qishui_rule_config"
+        private const val CURRENT_SCHEMA_VERSION = 2
+        private const val KEY_SCHEMA_VERSION = "schema_version"
         private const val KEY_TARGET_PACKAGE = "target_package"
         private const val KEY_MAX_ROUNDS = "max_rounds"
         private const val KEY_SINGLE_TIMEOUT = "single_timeout_sec"

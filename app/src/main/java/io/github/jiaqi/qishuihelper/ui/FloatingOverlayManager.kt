@@ -22,6 +22,7 @@ import kotlin.math.abs
 
 class FloatingOverlayManager(
     context: Context,
+    private val onStartClicked: () -> Unit,
     private val onStopClicked: () -> Unit
 ) {
     private val appContext = context.applicationContext
@@ -30,9 +31,13 @@ class FloatingOverlayManager(
     private var binding: ViewFloatingCapsuleBinding? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var isAdded = false
+    private var keepPinnedWhenIdle = false
+
+    fun isShowing(): Boolean = isAdded
 
     @SuppressLint("ClickableViewAccessibility")
-    fun showIfPermitted() {
+    fun showIfPermitted(pinnedWhenIdle: Boolean = keepPinnedWhenIdle) {
+        keepPinnedWhenIdle = keepPinnedWhenIdle || pinnedWhenIdle
         if (isAdded || !Settings.canDrawOverlays(appContext)) return
 
         runCatching {
@@ -49,14 +54,23 @@ class FloatingOverlayManager(
             ).apply {
                 gravity = Gravity.TOP or Gravity.END
                 x = 18
-                y = 280
+                y = 300
+            }
+
+            vb.btnCapsuleStart.setOnClickListener {
+                onStartClicked.invoke()
             }
 
             vb.btnCapsuleStop.setOnClickListener {
                 onStopClicked.invoke()
             }
 
-            // 支持手指按住胶囊上下左右拖动调整位置
+            vb.btnCapsuleClose.setOnClickListener {
+                keepPinnedWhenIdle = false
+                onStopClicked.invoke()
+                dismiss()
+            }
+
             var initialX = 0
             var initialY = 0
             var downRawX = 0f
@@ -94,6 +108,7 @@ class FloatingOverlayManager(
             binding = vb
             layoutParams = params
             isAdded = true
+            updateStatus(AppLogBus.status.value)
         }.onFailure { err ->
             AppLogBus.warn("显示悬浮胶囊失败：${err.message}")
         }
@@ -101,13 +116,30 @@ class FloatingOverlayManager(
 
     fun updateStatus(status: TaskStatus) {
         val vb = binding ?: return
-        val roundInfo = if (status.currentRound > 0) {
+        val running = status.phase.isRunning
+        vb.btnCapsuleStart.visibility = if (running) View.GONE else View.VISIBLE
+        vb.btnCapsuleStop.visibility = if (running) View.VISIBLE else View.GONE
+        vb.btnCapsuleClose.visibility = if (running) View.GONE else View.VISIBLE
+
+        val roundInfo = if (status.currentRound > 0 || running) {
             "[${status.currentRound}/${status.maxRounds}] "
         } else {
             ""
         }
-        val timerInfo = if (status.roundElapsedSec > 0) " ${status.roundElapsedSec}s" else ""
+        val timerInfo = if (running && status.roundElapsedSec > 0) {
+            " ${status.roundElapsedSec}s"
+        } else {
+            ""
+        }
         vb.tvCapsuleStatus.text = "$roundInfo${status.phase.label}$timerInfo"
+    }
+
+    fun onTaskFinished() {
+        if (!keepPinnedWhenIdle) {
+            dismiss()
+        } else {
+            updateStatus(AppLogBus.status.value)
+        }
     }
 
     fun getBoundsOnScreen(): Rect? {
@@ -119,7 +151,7 @@ class FloatingOverlayManager(
     }
 
     /**
-     * 截屏 OCR 前短暂隐藏悬浮胶囊，避免遮挡目标按钮或把悬浮窗自身文字识别进去
+     * 截屏 OCR 前短暂隐藏悬浮胶囊，避免遮挡汽水音乐按钮或识别进自身文字
      */
     suspend fun <T> withTemporarilyHidden(block: suspend () -> T): T {
         val root = binding?.root
@@ -129,7 +161,7 @@ class FloatingOverlayManager(
         withContext(Dispatchers.Main) {
             root.alpha = 0f
         }
-        delay(45L)
+        delay(55L)
         return try {
             block()
         } finally {
@@ -140,6 +172,7 @@ class FloatingOverlayManager(
     }
 
     fun dismiss() {
+        keepPinnedWhenIdle = false
         val vb = binding ?: return
         if (isAdded) {
             runCatching { windowManager.removeView(vb.root) }

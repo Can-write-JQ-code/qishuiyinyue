@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
 
     private val notificationPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* 通知权限可选，不阻塞主流程 */ }
+    ) { /* 通知权限可选 */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,44 +97,59 @@ class MainActivity : AppCompatActivity() {
         binding.btnSaveConfig.setOnClickListener {
             val saved = readConfigFromInputs()
             configRepo.save(saved)
-            AppLogBus.info("已保存自定义规则配置（目标=${saved.targetPackage}，上限=${saved.maxRounds}轮）")
+            AppLogBus.info("已保存规则配置（目标=${saved.targetPackage}，轮数=${saved.maxRounds}轮）")
             Toast.makeText(this, "规则配置已保存", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnResetConfig.setOnClickListener {
             val defaults = configRepo.resetToDefault()
             bindConfigToInputs(defaults)
-            AppLogBus.info("已恢复默认关键词与策略配置")
+            AppLogBus.info("已重置为最新默认规则配置")
             Toast.makeText(this, "已恢复默认配置", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnStartTask.setOnClickListener {
-            // 启动前自动保存当前表单中的最新规则
             val latestConfig = readConfigFromInputs()
             configRepo.save(latestConfig)
 
-            if (!isAccessibilityEnabled()) {
-                MaterialAlertDialogBuilder(this)
-                    .setTitle("请先开启无障碍服务")
-                    .setMessage("需要开启「${getString(R.string.accessibility_service_label)}」才能识别激励视频倒计时并模拟点击。\n\n若开关呈灰色提示「受限设置」，请先点页面右上角「受限设置开启说明」。")
-                    .setPositiveButton("去开启") { _, _ ->
-                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    }
-                    .setNeutralButton("受限设置说明") { _, _ ->
-                        showRestrictedSettingsGuide()
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
-                return@setOnClickListener
-            }
+            if (!ensureAccessibilityOrPrompt()) return@setOnClickListener
 
             val started = AdHelperAccessibilityService.requestStartTask()
             if (!started) {
                 Toast.makeText(
                     this,
-                    "无障碍服务正在重连，请在系统无障碍设置中重新开关一次本服务",
+                    "无障碍服务正在重连，请去系统无障碍列表重新开关一次本服务",
                     Toast.LENGTH_LONG
                 ).show()
+            }
+        }
+
+        binding.btnShowOverlay.setOnClickListener {
+            val latestConfig = readConfigFromInputs()
+            configRepo.save(latestConfig)
+
+            if (!Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show()
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+                return@setOnClickListener
+            }
+            if (!ensureAccessibilityOrPrompt()) return@setOnClickListener
+
+            val ok = AdHelperAccessibilityService.requestShowPinnedOverlay()
+            if (ok) {
+                Toast.makeText(this, "悬浮窗已开启，现在可打开汽水音乐点「▶ 启动」", Toast.LENGTH_LONG).show()
+                // 顺手尝试切到汽水音乐方便用户操作
+                packageManager.getLaunchIntentForPackage(latestConfig.targetPackage)?.let {
+                    it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                    runCatching { startActivity(it) }
+                }
+            } else {
+                Toast.makeText(this, "无障碍实例尚未就绪，请重新开关一次无障碍服务", Toast.LENGTH_LONG).show()
             }
         }
 
@@ -160,6 +175,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun ensureAccessibilityOrPrompt(): Boolean {
+        if (isAccessibilityEnabled()) return true
+        MaterialAlertDialogBuilder(this)
+            .setTitle("请先开启无障碍服务")
+            .setMessage("需要开启「${getString(R.string.accessibility_service_label)}」才能识别福利页「领时长」与激励视频状态。\n\n若开关呈灰色提示「受限设置」，请先点「受限设置说明」。")
+            .setPositiveButton("去开启") { _, _ ->
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            .setNeutralButton("受限设置说明") { _, _ ->
+                showRestrictedSettingsGuide()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+        return false
+    }
+
     private fun observeTaskAndLogs() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -181,7 +212,7 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     AppLogBus.logs.collect { lines ->
                         binding.tvLogs.text = if (lines.isEmpty()) {
-                            "等待任务启动..."
+                            "等待任务启动（启动后此处会实时打印每一帧读到的节点与 OCR 文字）..."
                         } else {
                             lines.joinToString("\n")
                         }
@@ -205,9 +236,9 @@ class MainActivity : AppCompatActivity() {
 
         val overlayOk = Settings.canDrawOverlays(this)
         binding.tvPermOverlay.text = if (overlayOk) {
-            "悬浮窗胶囊：✅ 已授权（支持随时急停）"
+            "悬浮窗胶囊：✅ 已授权（支持随时启停）"
         } else {
-            "悬浮窗胶囊：⚠️ 未授权（建议开启）"
+            "悬浮窗胶囊：⚠️ 未授权（强烈建议开启）"
         }
         binding.btnPermOverlay.text = if (overlayOk) "已授权" else "去授权"
 
@@ -293,7 +324,7 @@ class MainActivity : AppCompatActivity() {
         val defaults = RuleConfig()
         val pkg = binding.etTargetPackage.text?.toString()?.trim().orEmpty()
             .ifEmpty { defaults.targetPackage }
-        val rounds = binding.etMaxRounds.text?.toString()?.toIntOrNull()?.coerceIn(1, 5)
+        val rounds = binding.etMaxRounds.text?.toString()?.toIntOrNull()?.coerceIn(1, 10)
             ?: defaults.maxRounds
         val timeout = binding.etSingleTimeoutSec.text?.toString()?.toIntOrNull()?.coerceIn(45, 120)
             ?: defaults.singleAdTimeoutSec

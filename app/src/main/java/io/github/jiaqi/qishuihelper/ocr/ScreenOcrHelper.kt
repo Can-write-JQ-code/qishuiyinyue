@@ -3,6 +3,7 @@ package io.github.jiaqi.qishuihelper.ocr
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.os.SystemClock
 import android.view.Display
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -10,9 +11,11 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import io.github.jiaqi.qishuihelper.model.MatchSource
 import io.github.jiaqi.qishuihelper.model.TargetMatch
 import io.github.jiaqi.qishuihelper.util.AppLogBus
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 data class OcrLineRecord(
     val text: String,
@@ -26,19 +29,50 @@ class ScreenOcrHelper {
         ChineseTextRecognizerOptions.Builder().build()
     )
 
+    @Volatile
+    private var lastScreenshotUptimeMs: Long = 0L
+
     /**
-     * 通过 Android 11+ 无障碍静默截屏 + ML Kit 中文离线模型识别当前屏幕所有文字行
+     * 通过 Android 11+ 无障碍静默截屏 + 等比缩放加速 + ML Kit 中文离线模型识别全屏文字
      */
     suspend fun captureAndRecognize(
         service: AccessibilityService,
         excludeRect: Rect? = null
     ): List<OcrLineRecord> {
-        val bitmap = takeSilentScreenshot(service) ?: return emptyList()
+        // 遵守 Android 11/12 截屏最小间隔限制，避免报 errorCode=3 (INTERVAL_TIME_SHORT)
+        val elapsed = SystemClock.uptimeMillis() - lastScreenshotUptimeMs
+        if (elapsed in 0..1149L) {
+            delay(1150L - elapsed)
+        }
+
+        val rawBitmap = takeSilentScreenshot(service) ?: return emptyList()
+        lastScreenshotUptimeMs = SystemClock.uptimeMillis()
+
+        var scaledBitmap: Bitmap? = null
         return try {
-            recognizeBitmap(bitmap, excludeRect)
+            val origW = rawBitmap.width
+            val origH = rawBitmap.height
+            val scale = if (origW > MAX_OCR_WIDTH) {
+                MAX_OCR_WIDTH.toFloat() / origW.toFloat()
+            } else {
+                1.0f
+            }
+            val bitmapForOcr = if (scale < 0.999f) {
+                val targetW = (origW * scale).roundToInt().coerceAtLeast(1)
+                val targetH = (origH * scale).roundToInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(rawBitmap, targetW, targetH, true).also {
+                    scaledBitmap = it
+                }
+            } else {
+                rawBitmap
+            }
+            recognizeBitmap(bitmapForOcr, 1.0f / scale, excludeRect)
         } finally {
-            if (!bitmap.isRecycled) {
-                bitmap.recycle()
+            if (scaledBitmap != null && scaledBitmap !== rawBitmap && !scaledBitmap!!.isRecycled) {
+                scaledBitmap!!.recycle()
+            }
+            if (!rawBitmap.isRecycled) {
+                rawBitmap.recycle()
             }
         }
     }
@@ -53,10 +87,10 @@ class ScreenOcrHelper {
                         override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                             val hardwareBuffer = screenshot.hardwareBuffer
                             try {
-                                val hwBitmap = Bitmap.wrapHardwareBuffer(
-                                    hardwareBuffer,
-                                    screenshot.colorSpace
-                                )
+                                val hwBitmap = runCatching {
+                                    Bitmap.wrapHardwareBuffer(hardwareBuffer, screenshot.colorSpace)
+                                }.getOrNull() ?: Bitmap.wrapHardwareBuffer(hardwareBuffer, null)
+
                                 val softBitmap = hwBitmap?.copy(Bitmap.Config.ARGB_8888, false)
                                 hwBitmap?.recycle()
                                 if (cont.isActive) {
@@ -73,7 +107,7 @@ class ScreenOcrHelper {
                         }
 
                         override fun onFailure(errorCode: Int) {
-                            AppLogBus.warn("无障碍截屏暂不可用(errorCode=$errorCode)")
+                            AppLogBus.warn("无障碍静默截屏失败(errorCode=$errorCode)")
                             if (cont.isActive) cont.resume(null)
                         }
                     }
@@ -86,6 +120,7 @@ class ScreenOcrHelper {
 
     private suspend fun recognizeBitmap(
         bitmap: Bitmap,
+        invScale: Float,
         excludeRect: Rect?
     ): List<OcrLineRecord> = suspendCancellableCoroutine { cont ->
         val inputImage = InputImage.fromBitmap(bitmap, 0)
@@ -94,17 +129,24 @@ class ScreenOcrHelper {
                 val records = mutableListOf<OcrLineRecord>()
                 for (block in visionText.textBlocks) {
                     for (line in block.lines) {
-                        val box = line.boundingBox ?: continue
-                        if (excludeRect != null && Rect.intersects(box, excludeRect)) {
+                        val rawBox = line.boundingBox ?: continue
+                        val mappedBox = Rect(
+                            (rawBox.left * invScale).roundToInt(),
+                            (rawBox.top * invScale).roundToInt(),
+                            (rawBox.right * invScale).roundToInt(),
+                            (rawBox.bottom * invScale).roundToInt()
+                        )
+                        if (excludeRect != null && Rect.intersects(mappedBox, excludeRect)) {
                             continue
                         }
                         val raw = line.text.trim()
-                        if (raw.isEmpty()) continue
+                        val norm = normalizeText(raw)
+                        if (norm.isEmpty()) continue
                         records.add(
                             OcrLineRecord(
                                 text = raw,
-                                normalizedText = raw.replace(" ", ""),
-                                bounds = Rect(box)
+                                normalizedText = norm,
+                                bounds = mappedBox
                             )
                         )
                     }
@@ -118,7 +160,7 @@ class ScreenOcrHelper {
     }
 
     /**
-     * 在 OCR 结果中查找匹配关键词，并对诸如「奖励已领取 | 关闭」这类合并胶囊按字符位置切分精确子坐标框
+     * 在 OCR 结果中查找匹配关键词，支持按字符比例切分合并胶囊坐标（如「奖励已领取 | 跳过」）
      */
     fun findBestMatch(
         lines: List<OcrLineRecord>,
@@ -127,14 +169,13 @@ class ScreenOcrHelper {
         regionPredicate: ((Rect) -> Boolean)? = null
     ): TargetMatch? {
         for (keyword in keywords) {
-            val cleanKey = keyword.replace(" ", "")
+            val cleanKey = normalizeText(keyword)
             if (cleanKey.isEmpty()) continue
 
             for (line in lines) {
-                if (excludeContaining.any { ex -> line.normalizedText.contains(ex) }) {
+                if (excludeContaining.any { ex -> line.normalizedText.contains(normalizeText(ex)) }) {
                     continue
                 }
-                // 单字关键词（如「免」）要求整行较短，避免误中歌词中的普通汉字
                 if (cleanKey.length == 1 && line.normalizedText.length > 4) {
                     continue
                 }
@@ -184,5 +225,31 @@ class ScreenOcrHelper {
 
     fun close() {
         runCatching { recognizer.close() }
+    }
+
+    companion object {
+        private const val MAX_OCR_WIDTH = 1080
+        private val DECOR_EDGE_REGEX = Regex("^[×xX✕✖·•|丨\\[\\]【】()（）<>《》\\s]+|[×xX✕✖·•|丨\\[\\]【】()（）<>《》\\s]+$")
+
+        /**
+         * 归一化 OCR 常见形近字混淆与首尾符号（参考开源社区实测修正表）
+         */
+        fun normalizeText(raw: String): String {
+            if (raw.isBlank()) return ""
+            return raw
+                .replace(" ", "")
+                .replace("\u3000", "")
+                .replace("，", ",")
+                .replace(DECOR_EDGE_REGEX, "")
+                .replace("领収", "领取")
+                .replace("领职", "领取")
+                .replace("领敢", "领取")
+                .replace("奨", "奖")
+                .replace("奬", "奖")
+                .replace("勵", "励")
+                .replace("时常", "时长")
+                .replace("時長", "时长")
+                .replace("福利", "福利")
+        }
     }
 }

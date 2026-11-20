@@ -15,12 +15,27 @@
         android:id="@+id/tvCapsuleStatus"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:maxWidth="180dp"
-        android:singleLine="true"
         android:ellipsize="end"
-        android:text="待命中"
+        android:maxWidth="175dp"
+        android:singleLine="true"
+        android:text="畅听助手"
         android:textColor="@color/white"
         android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/btnCapsuleStart"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:background="#0F9D76"
+        android:paddingStart="8dp"
+        android:paddingTop="3dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="3dp"
+        android:text="▶ 启动"
+        android:textColor="@color/white"
+        android:textSize="11sp"
+        android:textStyle="bold" />
 
     <TextView
         android:id="@+id/btnCapsuleStop"
@@ -32,9 +47,24 @@
         android:paddingTop="3dp"
         android:paddingEnd="8dp"
         android:paddingBottom="3dp"
-        android:text="停止"
+        android:text="■ 停止"
         android:textColor="@color/white"
         android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/btnCapsuleClose"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:paddingStart="6dp"
+        android:paddingTop="3dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="3dp"
+        android:text="×"
+        android:textColor="#CCFFFFFF"
+        android:textSize="13sp"
         android:textStyle="bold" />
 
 </LinearLayout>

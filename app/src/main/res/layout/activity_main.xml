@@ -17,7 +17,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="畅听自动化助手"
+            android:text="畅听自动化助手 v1.1"
             android:textColor="@color/text_primary"
             android:textSize="22sp"
             android:textStyle="bold" />
@@ -27,7 +27,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:layout_marginBottom="14dp"
-            android:text="无障碍节点 + 静默截屏 OCR 双引擎 · 自动静音 · 防误跳守护"
+            android:text="自动进【福利】点【领时长】 · 多窗口穿透 + 离线中文 OCR · 自动静音防误跳"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
@@ -205,33 +205,43 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="点击下方启动后将自动拉起目标应用、临时静音并看视频解锁畅听。"
+                    android:text="可直接点下方一键全自动运行，或先挂起悬浮窗后手动打开汽水音乐在任意页点 ▶ 启动。"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnStartTask"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="12dp"
+                    android:text="一键全自动领畅听（自动拉起汽水）"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="8dp"
                     android:orientation="horizontal">
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnStartTask"
+                        android:id="@+id/btnShowOverlay"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="0dp"
-                        android:layout_height="48dp"
+                        android:layout_height="44dp"
                         android:layout_weight="1"
-                        android:text="一键启动自动领畅听"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
+                        android:text="开启常驻悬浮窗（去汽水内点 ▶）"
+                        android:textSize="12.5sp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnStopTask"
                         style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="10dp"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="8dp"
                         android:text="停止并恢复音量"
-                        android:textColor="@color/danger_red" />
+                        android:textColor="@color/danger_red"
+                        android:textSize="12.5sp" />
                 </LinearLayout>
 
             </LinearLayout>
@@ -256,7 +266,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="3. 策略与关键词规则（支持自定义微调）"
+                    android:text="3. 策略与关键词规则（已内置最新福利页规则）"
                     android:textColor="@color/text_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -266,7 +276,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="10dp"
-                    android:text="多个关键词用竖线 | 分隔。若目标应用更新文案，直接修改保存即可生效。"
+                    android:text="默认观看 2 轮广告解锁当日畅听；若需多攒天数可将轮数调大（1-10）。"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
@@ -293,7 +303,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:hint="单次最多连看轮数 (1-5)">
+                        android:hint="每次观看广告轮数 (1-10)">
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/etMaxRounds"
@@ -333,7 +343,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:hint="触发入口关键词（| 分隔）">
+                    android:hint="领时长入口关键词（| 分隔）">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etEntryKeywords"
@@ -346,7 +356,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:hint="已拿满全天畅听特征词（| 分隔）">
+                    android:hint="今日已领满特征词（| 分隔）">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etUnlockedKeywords"
@@ -372,7 +382,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:hint="二段激励连看按钮词（| 分隔）">
+                    android:hint="连看下一轮弹窗按钮词（| 分隔）">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etNextAdKeywords"
@@ -446,7 +456,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="4. 实时状态机与识别日志"
+                        android:text="4. 实时画面识别与状态日志"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:textStyle="bold" />
@@ -473,7 +483,7 @@
                 <androidx.core.widget.NestedScrollView
                     android:id="@+id/scrollLogs"
                     android:layout_width="match_parent"
-                    android:layout_height="220dp"
+                    android:layout_height="240dp"
                     android:layout_marginTop="6dp"
                     android:background="@drawable/bg_log_box"
                     android:padding="10dp">
@@ -484,7 +494,7 @@
                         android:layout_height="wrap_content"
                         android:fontFamily="monospace"
                         android:lineSpacingExtra="3dp"
-                        android:text="等待任务启动..."
+                        android:text="等待任务启动（启动后此处会实时打印每一帧读到的节点与 OCR 文字）..."
                         android:textColor="@color/text_log"
                         android:textIsSelectable="true"
                         android:textSize="11.5sp" />
