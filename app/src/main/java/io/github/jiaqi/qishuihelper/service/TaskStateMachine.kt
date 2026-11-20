@@ -26,7 +26,7 @@ class TaskStateMachine(
         var activeAdStartMs = 0L
         var countedCurrentAd = false
         var closeAttemptsForCurrentAd = 0
-        var welfareNavAttempts = 0
+        var goldCoinAttempts = 0
         var externalJumpStreak = 0
         var unknownTicks = 0
 
@@ -51,7 +51,7 @@ class TaskStateMachine(
         val maxTotalDurationMs = ((config.maxRounds * (config.singleAdTimeoutSec + 35)) + 90) * 1000L
 
         try {
-            AppLogBus.info("====== 启动极速连看 v1.2（目标轮数=${config.maxRounds}, 极速=${fast}, 仅领今日=${config.stopOnTomorrow}）======")
+            AppLogBus.info("====== 启动极速连看 v1.3（目标轮数=${config.maxRounds}, 极速=${fast}, 仅领今日=${config.stopOnTomorrow}）======")
             volumeGuard.muteIfNeeded(config.autoMuteMedia)
 
             val initialPkg = host.getCurrentPackageName()
@@ -63,7 +63,7 @@ class TaskStateMachine(
                     publish(TaskPhase.ERROR, "未检测到应用(${config.targetPackage})，请确认已安装")
                     return
                 }
-                delay(2800L)
+                delay(2500L)
             }
 
             var loopIndex = 0
@@ -79,7 +79,7 @@ class TaskStateMachine(
                 val topAct = host.getCurrentActivityClass()
                 val topWin = host.getLatestWindowClass()
 
-                // 场景 1：跳出目标应用保护（若回到系统桌面则立即重拉汽水，不浪费返回键）
+                // 场景 1：跳出汽水音乐保护（若在桌面则立即重拉，不发无意义返回键）
                 if (fgPkg.isNotEmpty() &&
                     fgPkg != config.targetPackage &&
                     fgPkg != host.packageName &&
@@ -88,30 +88,46 @@ class TaskStateMachine(
                     val isLauncher = fgPkg.contains("launcher", ignoreCase = true) ||
                         fgPkg.contains("home", ignoreCase = true)
                     if (isLauncher || loopIndex <= 2 || externalJumpStreak >= 1) {
-                        AppLogBus.info("当前在外部桌面/应用($fgPkg)，立即切回汽水音乐")
+                        AppLogBus.info("当前在外部应用/桌面($fgPkg)，立即切回汽水音乐")
                         host.launchTargetApp(config.targetPackage)
                         externalJumpStreak = 0
-                        delay(1600L)
+                        delay(1500L)
                         continue
                     }
                     externalJumpStreak++
                     AppLogBus.warn("拦截广告外跳($fgPkg)，执行返回拉回")
                     host.performGlobalBack("拦截外跳:$fgPkg", fast)
-                    delay(1400L)
+                    delay(1300L)
                     continue
                 } else {
                     externalJumpStreak = 0
                 }
 
-                val topRegion: (Rect) -> Boolean = { rect -> rect.bottom <= (screenH * 0.24f).toInt() }
+                val topRegion: (Rect) -> Boolean = { rect -> rect.bottom <= (screenH * 0.22f).toInt() }
                 val modalRegion: (Rect) -> Boolean = { rect ->
                     rect.top >= (screenH * 0.24f).toInt() &&
-                        rect.bottom <= (screenH * 0.86f).toInt() &&
-                        rect.left >= (screenW * 0.10f).toInt() &&
-                        rect.right <= (screenW * 0.90f).toInt()
+                        rect.bottom <= (screenH * 0.80f).toInt() &&
+                        rect.left >= (screenW * 0.12f).toInt() &&
+                        rect.right <= (screenW * 0.88f).toInt()
                 }
 
-                // ====== 零截屏节点极速快检通道（耗时 <5ms，免去无谓 OCR 耗时） ======
+                // ====== 零截屏节点极速通道 0：开屏广告秒跳（截图5：AdActivity 含「开通SVIP免广告」「跳过 4」） ======
+                val isSplashAdActivity = topAct.endsWith(".AdActivity") || topAct == "AdActivity"
+                if (isSplashAdActivity || System.currentTimeMillis() - taskStartMs < 12_000L) {
+                    val fastSplashSkip = host.findNodeMatch(
+                        keywords = listOf("跳过"),
+                        excludeContaining = listOf("奖励已领取"),
+                        regionPredicate = { it.bottom <= (screenH * 0.18f).toInt() && it.left >= (screenW * 0.65f).toInt() }
+                    )
+                    if (fastSplashSkip != null && fastSplashSkip.fullText.length <= 8) {
+                        AppLogBus.info("⚡ 秒跳冷启动开屏广告：「${fastSplashSkip.fullText}」")
+                        host.performSmartTap(fastSplashSkip, "秒跳开屏广告", Humanizer.randomUiNavDelayMs(fast))
+                        delay(1000L)
+                        continue
+                    }
+                }
+
+                // ====== 零截屏节点极速通道 A：激励视频倒计时中（截图3：「19秒后可领取奖励」） ======
                 val fastNodeCountdown = host.findNodeMatch(
                     keywords = listOf("秒后", "秒可领", "后可领", "后可获"),
                     regionPredicate = topRegion
@@ -123,7 +139,6 @@ class TaskStateMachine(
                     regionPredicate = modalRegion
                 )
 
-                // 快检通道 A：无障碍节点已明确显示仍在倒计时且无中途退出框 -> 直接等待，无需截屏 OCR！
                 if (fastNodeCountdown != null && fastNodeExitBtn == null && fastNodeNextBtn == null) {
                     volumeGuard.muteIfNeeded(config.autoMuteMedia)
                     if (activeAdStartMs == 0L) {
@@ -141,34 +156,59 @@ class TaskStateMachine(
                     continue
                 }
 
-                // 快检通道 B：无障碍节点已直接暴露「领取成功，关闭，按钮」且无连看弹窗 -> 秒点关闭！
-                val fastNodeRewardDone = host.findNodeMatch(
-                    keywords = config.rewardDoneKeywords,
-                    excludeContaining = listOf("秒后", "秒可领", "后可"),
-                    regionPredicate = topRegion
-                )
-                if (fastNodeRewardDone != null && fastNodeCountdown == null && fastNodeExitBtn == null && fastNodeNextBtn == null) {
-                    if (!countedCurrentAd) {
-                        completedAds++
-                        countedCurrentAd = true
-                        AppLogBus.info("⚡ 节点快检：第 $completedAds/${config.maxRounds} 轮奖励达成「${fastNodeRewardDone.fullText}」")
-                    }
-                    publish(TaskPhase.HANDLING_POPUP, "第 $completedAds 轮完成，快速关闭拉起连看...")
-                    val closeTarget = host.findAdCloseNodeTarget(fastNodeRewardDone.bounds, screenW, screenH) ?: fastNodeRewardDone
-                    closeAttemptsForCurrentAd++
-                    host.performSmartTap(
-                        match = closeTarget,
-                        reason = "极速关闭:${closeTarget.matchedKeyword}",
-                        delayMs = Humanizer.randomAdActionDelayMs(fast)
+                // ====== 零截屏节点极速通道 B：首次出现「领取成功，关闭」（截图2） ======
+                // 注意：仅在 closeAttemptsForCurrentAd == 0 时触发！点过一次关闭后，下一轮必须走 OCR 以识别截图1的 Canvas 连看弹窗！
+                if (closeAttemptsForCurrentAd == 0) {
+                    val fastNodeRewardDone = host.findNodeMatch(
+                        keywords = config.rewardDoneKeywords,
+                        excludeContaining = listOf("秒后", "秒可领", "后可"),
+                        regionPredicate = topRegion
                     )
-                    delay(Humanizer.randomPostActionSettleMs(fast))
-                    continue
+                    if (fastNodeRewardDone != null && fastNodeCountdown == null && fastNodeExitBtn == null && fastNodeNextBtn == null) {
+                        if (!countedCurrentAd) {
+                            completedAds++
+                            countedCurrentAd = true
+                            AppLogBus.info("⚡ 节点快检：第 $completedAds/${config.maxRounds} 轮奖励达成「${fastNodeRewardDone.fullText}」")
+                        }
+                        publish(TaskPhase.HANDLING_POPUP, "第 $completedAds 轮完成，秒点右上角 × 唤起连看框...")
+                        val closeTarget = host.findAdCloseNodeTarget(fastNodeRewardDone.bounds, screenW, screenH) ?: fastNodeRewardDone
+                        closeAttemptsForCurrentAd = 1
+                        host.performSmartTap(
+                            match = closeTarget,
+                            reason = "极速关闭:${closeTarget.matchedKeyword}",
+                            delayMs = Humanizer.randomAdActionDelayMs(fast)
+                        )
+                        delay(Humanizer.randomPostActionSettleMs(fast))
+                        continue
+                    }
                 }
 
-                // ====== 常规双引擎全量感知（无障碍节点 + 静默截屏 OCR） ======
+                // ====== 零截屏节点极速通道 C：半屏畅听抽屉（如「再看2个提前领」）直接秒点 ======
+                if (!isSplashAdActivity && completedAds < config.maxRounds && activeAdStartMs == 0L) {
+                    val fastSheetEntry = host.findNodeMatch(
+                        keywords = listOf("提前领", "领时长", "看视频免费听"),
+                        excludeContaining = listOf("金币", "宝箱", "元")
+                    )
+                    if (fastSheetEntry != null) {
+                        publish(TaskPhase.FINDING_ENTRY, "秒点「${fastSheetEntry.fullText}」开启第 ${completedAds + 1} 轮...")
+                        AppLogBus.info("⚡ 节点快检命中入口：「${fastSheetEntry.fullText}」")
+                        host.performSmartTap(
+                            match = fastSheetEntry,
+                            reason = "极速点击入口:${fastSheetEntry.matchedKeyword}",
+                            delayMs = Humanizer.randomUiNavDelayMs(fast)
+                        )
+                        activeAdStartMs = System.currentTimeMillis()
+                        countedCurrentAd = false
+                        closeAttemptsForCurrentAd = 0
+                        delay(Humanizer.randomPostActionSettleMs(fast))
+                        continue
+                    }
+                }
+
+                // ====== 双引擎全量感知（无障碍节点 + 静默截屏 OCR） ======
                 val nodePreview = host.collectNodeTextPreview(6)
                 val ocrLines = host.captureScreenOcrLines()
-                val ocrPreview = ocrLines.take(7).joinToString(", ") { it.text.take(14) }
+                val ocrPreview = ocrLines.take(8).joinToString(", ") { it.text.take(14) }
                 AppLogBus.info(
                     "画面[${topAct.substringAfterLast('.').ifEmpty { topWin.substringAfterLast('.') }}] " +
                         "节点=$nodePreview | OCR(${ocrLines.size})=[$ocrPreview]"
@@ -193,7 +233,7 @@ class TaskStateMachine(
                         reason = "确认退出直播:${liveConfirmHit.matchedKeyword}",
                         delayMs = Humanizer.randomUiNavDelayMs(fast)
                     )
-                    delay(1200L)
+                    delay(1100L)
                     continue
                 }
 
@@ -219,26 +259,27 @@ class TaskStateMachine(
                     } else {
                         host.performGlobalBack("退出直播间/偏离页", fast)
                     }
-                    delay(1300L)
+                    delay(1200L)
                     continue
                 }
 
+                // 区分真正的激励视频（顶部必有「反馈」或倒计时，且不是开屏 AdActivity）
                 val countdownHit = findHybrid(
                     keywords = listOf("秒后", "秒可领", "后可领", "后可获"),
                     ocrLines = ocrLines,
                     regionPredicate = topRegion
                 )
-                val inAdActivity = config.adActivityMarkers.any {
+                val inRewardAdActivity = !isSplashAdActivity && config.adActivityMarkers.any {
                     topAct.contains(it, ignoreCase = true)
                 }
-                val adHeaderHit = findHybrid(
-                    keywords = listOf("反馈", "广告"),
+                val adFeedbackHit = findHybrid(
+                    keywords = listOf("反馈"),
                     ocrLines = ocrLines,
                     regionPredicate = topRegion
                 )
-                val isInsideAd = inAdActivity || countdownHit != null || adHeaderHit != null
+                val isInsideRewardAd = inRewardAdActivity || countdownHit != null || adFeedbackHit != null
 
-                // 场景 5：核心无缝连看弹窗处理（「领取奖励 / 再看一个 / 继续观看」 vs 「坚持退出」）
+                // 场景 5：核心无缝连看弹窗处理（完全对齐截图1：再看1个视频提前得 / 第3日免费听 / 绿色[领取奖励] / 灰色[坚持退出]）
                 val exitModalBtn = findHybrid(
                     keywords = config.exitAdConfirmKeywords,
                     ocrLines = ocrLines,
@@ -250,9 +291,20 @@ class TaskStateMachine(
                     excludeContaining = listOf("秒后", "秒可领", "后可", "提前解锁下一天", "再看1次", "再看2次", "再看3次"),
                     regionPredicate = modalRegion
                 )
+                val modalHeadlineHit = if (isInsideRewardAd) {
+                    findHybrid(
+                        keywords = listOf("视频提前得", "日免费听", "天免费听"),
+                        ocrLines = ocrLines,
+                        regionPredicate = { rect ->
+                            rect.top >= (screenH * 0.28f).toInt() && rect.bottom <= (screenH * 0.56f).toInt()
+                        }
+                    )
+                } else {
+                    null
+                }
 
-                if ((isInsideAd && nextModalBtn != null) || exitModalBtn != null) {
-                    // 情况 A：顶部仍在倒计时，点「继续观看」恢复当前广告
+                if (exitModalBtn != null || (isInsideRewardAd && (nextModalBtn != null || modalHeadlineHit != null))) {
+                    // 情况 A：顶部仍在倒计时，点「继续观看」保住本轮广告
                     if (countdownHit != null) {
                         if (nextModalBtn != null) {
                             AppLogBus.info("倒计时未结束，点击「${nextModalBtn.matchedKeyword}」继续播放")
@@ -262,43 +314,58 @@ class TaskStateMachine(
                                 delayMs = Humanizer.randomUiNavDelayMs(fast)
                             )
                         }
-                        delay(1200L)
+                        delay(1100L)
                         continue
                     }
 
-                    // 情况 B：本条广告已播完弹出的连看/挽留框
+                    // 情况 B：本条广告已播完弹出的截图1连看弹窗
                     if (!countedCurrentAd && activeAdStartMs > 0L) {
                         completedAds++
                         countedCurrentAd = true
-                        AppLogBus.info("已完成第 $completedAds/${config.maxRounds} 轮广告")
+                        AppLogBus.info("确认完成第 $completedAds/${config.maxRounds} 轮广告")
                     }
 
                     val tomorrowHint = findHybrid(
-                        keywords = listOf("明日免费听", "后日免费听", "第3日", "第4日", "第5日"),
+                        keywords = listOf("明日免费听", "后日免费听", "第2日", "第3日", "第4日", "第5日"),
                         ocrLines = ocrLines
                     )
                     val shouldStopForTomorrow = config.stopOnTomorrow && tomorrowHint != null
 
                     if (completedAds < config.maxRounds && !shouldStopForTomorrow) {
-                        // 未满设定轮数：直接在弹窗内点击「领取奖励 / 再看一个」无缝开启下一条广告！
                         publish(TaskPhase.HANDLING_POPUP, "无缝连看第 ${completedAds + 1}/${config.maxRounds} 轮广告...")
-                        if (nextModalBtn != null) {
-                            AppLogBus.info("⚡ 无缝连看：点击「${nextModalBtn.fullText}」直接进入第 ${completedAds + 1} 轮")
-                            host.performSmartTap(
-                                match = nextModalBtn,
-                                reason = "无缝连看第${completedAds + 1}轮:${nextModalBtn.matchedKeyword}",
-                                delayMs = Humanizer.randomAdActionDelayMs(fast)
-                            )
-                        } else if (exitModalBtn != null) {
-                            // 艺术字图形按钮兜底：「领取奖励」主按钮正位于「坚持退出」上方约 7% 屏幕高度处
-                            val ctaRect = Rect(
-                                exitModalBtn.bounds.left - 70,
-                                (exitModalBtn.bounds.top - screenH * 0.082f).toInt(),
-                                exitModalBtn.bounds.right + 70,
-                                (exitModalBtn.bounds.top - screenH * 0.040f).toInt()
-                            )
-                            AppLogBus.info("⚡ 无缝连看：点击图形主按钮区开启第 ${completedAds + 1} 轮")
-                            host.performHumanTap(ctaRect, "连看主按钮坐标兜底", Humanizer.randomAdActionDelayMs(fast))
+                        val delayMs = Humanizer.randomAdActionDelayMs(fast)
+                        when {
+                            nextModalBtn != null -> {
+                                AppLogBus.info("⚡ 无缝连看：点击绿色主按钮「${nextModalBtn.fullText}」进入第 ${completedAds + 1} 轮")
+                                host.performSmartTap(
+                                    match = nextModalBtn,
+                                    reason = "连看第${completedAds + 1}轮:${nextModalBtn.matchedKeyword}",
+                                    delayMs = delayMs
+                                )
+                            }
+                            exitModalBtn != null -> {
+                                // 截图1实测几何关系：绿色「领取奖励」中心正位于「坚持退出」上方 6.7% 屏幕高度处
+                                val centerY = (exitModalBtn.bounds.centerY() - screenH * 0.067f).toInt()
+                                val ctaRect = Rect(
+                                    (screenW * 0.32f).toInt(),
+                                    centerY - (screenH * 0.022f).toInt(),
+                                    (screenW * 0.68f).toInt(),
+                                    centerY + (screenH * 0.022f).toInt()
+                                )
+                                AppLogBus.info("⚡ 无缝连看：按「坚持退出」上方精准坐标点击绿色「领取奖励」进入第 ${completedAds + 1} 轮")
+                                host.performHumanTap(ctaRect, "连看绿色按钮(相对定位)", delayMs)
+                            }
+                            else -> {
+                                // 截图1实测几何比例：绿色「领取奖励」位于屏幕水平居中、垂直 52.5%~56.5%
+                                val ctaRect = Rect(
+                                    (screenW * 0.32f).toInt(),
+                                    (screenH * 0.525f).toInt(),
+                                    (screenW * 0.68f).toInt(),
+                                    (screenH * 0.565f).toInt()
+                                )
+                                AppLogBus.info("⚡ 无缝连看：点击弹窗居中绿色「领取奖励」进入第 ${completedAds + 1} 轮")
+                                host.performHumanTap(ctaRect, "连看绿色按钮(居中定位)", delayMs)
+                            }
                         }
                         activeAdStartMs = System.currentTimeMillis()
                         countedCurrentAd = false
@@ -306,16 +373,20 @@ class TaskStateMachine(
                         delay(Humanizer.randomPostActionSettleMs(fast))
                         continue
                     } else {
-                        // 已看满设定轮数（或勾选了仅领今日且遇到明日畅听）-> 点「坚持退出」收尾
-                        publish(TaskPhase.HANDLING_POPUP, "已看满 $completedAds 轮，正在退出广告页...")
+                        // 已看满设定轮数 -> 点击截图1中的「坚持退出」结束任务
+                        publish(TaskPhase.HANDLING_POPUP, "已看满 $completedAds 轮，点击「坚持退出」收尾...")
+                        val delayMs = Humanizer.randomAdActionDelayMs(fast)
                         if (exitModalBtn != null) {
-                            host.performSmartTap(
-                                match = exitModalBtn,
-                                reason = "看满轮数点坚持退出",
-                                delayMs = Humanizer.randomAdActionDelayMs(fast)
-                            )
+                            host.performSmartTap(exitModalBtn, "看满轮数点坚持退出", delayMs)
                         } else {
-                            host.performGlobalBack("关闭挽留弹窗收尾", fast)
+                            // 截图1「坚持退出」实测位置：水平居中，垂直 60.2%~62.2%
+                            val exitRect = Rect(
+                                (screenW * 0.42f).toInt(),
+                                (screenH * 0.600f).toInt(),
+                                (screenW * 0.58f).toInt(),
+                                (screenH * 0.624f).toInt()
+                            )
+                            host.performHumanTap(exitRect, "看满轮数点坚持退出(定位)", delayMs)
                         }
                         activeAdStartMs = 0L
                         delay(Humanizer.randomPostActionSettleMs(fast))
@@ -323,7 +394,7 @@ class TaskStateMachine(
                     }
                 }
 
-                // 场景 6：单轮广告结束（出现「领取成功 / 奖励已领取」），快速点击右上角 × 拉起连看框
+                // 场景 6：单轮广告结束（截图2：右上角「领取成功 ×」），点击拉起截图1连看弹窗
                 val rewardDoneHit = findHybrid(
                     keywords = config.rewardDoneKeywords,
                     ocrLines = ocrLines,
@@ -336,7 +407,7 @@ class TaskStateMachine(
                         countedCurrentAd = true
                         AppLogBus.info("第 $completedAds/${config.maxRounds} 轮奖励达成[${rewardDoneHit.source}]：「${rewardDoneHit.fullText}」")
                     }
-                    publish(TaskPhase.HANDLING_POPUP, "第 $completedAds 轮完成，点击关闭触发连看...")
+                    publish(TaskPhase.HANDLING_POPUP, "第 $completedAds 轮完成，点击「领取成功 ×」...")
 
                     val closeNodeTarget = host.findAdCloseNodeTarget(rewardDoneHit.bounds, screenW, screenH)
                     val topRightCloseText = findHybrid(
@@ -344,7 +415,7 @@ class TaskStateMachine(
                         ocrLines = ocrLines,
                         excludeContaining = listOf("秒后"),
                         regionPredicate = {
-                            it.bottom <= (screenH * 0.20f).toInt() && it.left >= (screenW * 0.52f).toInt()
+                            it.bottom <= (screenH * 0.18f).toInt() && it.left >= (screenW * 0.55f).toInt()
                         }
                     )
 
@@ -357,35 +428,37 @@ class TaskStateMachine(
                         topRightCloseText != null -> {
                             host.performSmartTap(topRightCloseText, "文字关闭:${topRightCloseText.matchedKeyword}", actionDelay)
                         }
-                        closeAttemptsForCurrentAd == 1 && rewardDoneHit.bounds.left >= (screenW * 0.50f).toInt() -> {
-                            val xCloseLeft = rewardDoneHit.bounds.right - 6
-                            val xCloseRight = min(screenW - 14, rewardDoneHit.bounds.right + 64)
+                        closeAttemptsForCurrentAd == 1 && rewardDoneHit.bounds.left >= (screenW * 0.55f).toInt() -> {
+                            // 截图2：「领取成功 ×」胶囊整体可点，偏右点击 × 位置更稳
+                            val xCloseLeft = rewardDoneHit.bounds.right - 12
+                            val xCloseRight = min(screenW - 16, rewardDoneHit.bounds.right + 58)
                             val rightXRect = if (xCloseRight > xCloseLeft + 14) {
                                 Rect(xCloseLeft, rewardDoneHit.bounds.top, xCloseRight, rewardDoneHit.bounds.bottom)
                             } else {
                                 rewardDoneHit.bounds
                             }
-                            host.performHumanTap(rightXRect, "点击领取成功右侧×", actionDelay)
+                            host.performHumanTap(rightXRect, "点击领取成功×胶囊", actionDelay)
                         }
                         closeAttemptsForCurrentAd == 2 -> {
-                            host.performGlobalBack("奖励已达成返回关闭", fast)
+                            // 截图2实测「领取成功 ×」右上角胶囊位置 (76%~95% W, 4.8%~7.4% H)
+                            val capsuleRect = Rect(
+                                (screenW * 0.88f).toInt(),
+                                (screenH * 0.050f).toInt(),
+                                (screenW * 0.945f).toInt(),
+                                (screenH * 0.074f).toInt()
+                            )
+                            host.performHumanTap(capsuleRect, "右上角×精准坐标", actionDelay)
                         }
                         else -> {
-                            val stdTopRight = Rect(
-                                (screenW * 0.885f).toInt(),
-                                (screenH * 0.052f).toInt(),
-                                (screenW * 0.955f).toInt(),
-                                (screenH * 0.092f).toInt()
-                            )
-                            host.performHumanTap(stdTopRight, "右上角×热区兜底", actionDelay)
+                            host.performGlobalBack("奖励已达成返回触发弹窗", fast)
                         }
                     }
                     delay(Humanizer.randomPostActionSettleMs(fast))
                     continue
                 }
 
-                // 场景 7：广告仍在播放中（防止空白加载帧误判退出：只要 topAct 仍是广告 Activity 就继续守护）
-                if (isInsideAd) {
+                // 场景 7：激励视频仍在倒计时播放中（截图3）
+                if (isInsideRewardAd) {
                     volumeGuard.muteIfNeeded(config.autoMuteMedia)
                     if (activeAdStartMs == 0L) {
                         activeAdStartMs = System.currentTimeMillis()
@@ -421,58 +494,33 @@ class TaskStateMachine(
                     continue
                 }
 
-                // 若遇到全空过渡帧 (CommonLoadingDialog 切换瞬间)，等待下一帧确认，绝不误判为广告已退出！
+                // 过渡空帧保护
                 if (nodePreview.isEmpty() && ocrLines.isEmpty()) {
-                    delay(700L)
+                    delay(650L)
                     continue
                 }
 
-                // ====== 以下确认已回到汽水音乐主界面 / 福利中心 / 抽屉弹窗 ======
+                // ====== 以下为非激励视频界面（截图5开屏广告 / 截图4播放页 / 领时长抽屉页） ======
                 activeAdStartMs = 0L
                 countedCurrentAd = false
                 closeAttemptsForCurrentAd = 0
 
-                // 场景 8A：冷启动开屏广告秒跳
-                if (System.currentTimeMillis() - taskStartMs < 12_000L) {
+                // 场景 8A：OCR 兜底跳过开屏广告（截图5右上角「跳过 4」）
+                if (isSplashAdActivity || System.currentTimeMillis() - taskStartMs < 14_000L) {
                     val splashSkip = findHybrid(
                         keywords = listOf("跳过"),
                         ocrLines = ocrLines,
-                        regionPredicate = { it.bottom <= (screenH * 0.20f).toInt() && it.width() < (screenW * 0.35f).toInt() }
+                        regionPredicate = { it.bottom <= (screenH * 0.18f).toInt() && it.left >= (screenW * 0.65f).toInt() }
                     )
                     if (splashSkip != null && splashSkip.fullText.length <= 8) {
+                        AppLogBus.info("跳过开屏广告：「${splashSkip.fullText}」")
                         host.performSmartTap(splashSkip, "跳过开屏广告", Humanizer.randomUiNavDelayMs(fast))
-                        delay(1100L)
+                        delay(1000L)
                         continue
                     }
                 }
 
-                // 场景 8B：关闭普通提示框
-                val neutralPopup = findHybrid(config.neutralDismissKeywords, ocrLines)
-                if (neutralPopup != null) {
-                    host.performSmartTap(neutralPopup, "关闭弹窗:${neutralPopup.matchedKeyword}", Humanizer.randomUiNavDelayMs(fast))
-                    delay(1100L)
-                    continue
-                }
-
-                // 场景 8C：关闭付费推销浮层
-                val promoPopup = findHybrid(config.promoBackKeywords, ocrLines)
-                if (promoPopup != null) {
-                    host.performGlobalBack("关闭推销/恭喜浮层:${promoPopup.matchedKeyword}", fast)
-                    delay(1100L)
-                    continue
-                }
-
-                // 场景 8D：检查是否已达设定轮数或今日上限
-                val alreadyUnlocked = findHybrid(
-                    keywords = config.unlockedKeywords,
-                    ocrLines = ocrLines,
-                    excludeContaining = listOf("看视频", "看广告", "领时长")
-                )
-                if (alreadyUnlocked != null) {
-                    publish(TaskPhase.COMPLETED, "今日畅听已领满（${alreadyUnlocked.fullText}）")
-                    return
-                }
-
+                // 场景 8B：已完成目标轮数 -> 干净收尾退出
                 if (completedAds >= config.maxRounds) {
                     val finalUnlockBtn = findHybrid(
                         keywords = listOf("立即解锁"),
@@ -481,20 +529,46 @@ class TaskStateMachine(
                     )
                     if (finalUnlockBtn != null) {
                         host.performSmartTap(finalUnlockBtn, "点击立即解锁畅听", Humanizer.randomUiNavDelayMs(fast))
-                        delay(1300L)
+                        delay(1100L)
+                    } else if (topWin.contains("SheetDialog", ignoreCase = true)) {
+                        host.performGlobalBack("收起底部畅听抽屉", fast)
                     }
                     publish(TaskPhase.COMPLETED, "已极速连看完成 $completedAds/${config.maxRounds} 轮并恢复原音量")
-                    AppLogBus.info("已完成全部 $completedAds 轮广告连看，畅听领取完毕")
+                    AppLogBus.info("🎉 已完成全部 $completedAds 轮广告无缝连看！")
                     return
                 }
 
-                // 场景 9：点击福利抽屉「提前领」（如「再看1个提前领」）或福利中心「领时长」
-                val entryMatch = findBestEntryButton(config, ocrLines, screenH)
+                // 场景 8C：关闭普通升级/提示弹窗与付费推销层
+                val neutralPopup = findHybrid(config.neutralDismissKeywords, ocrLines)
+                if (neutralPopup != null) {
+                    host.performSmartTap(neutralPopup, "关闭提示窗:${neutralPopup.matchedKeyword}", Humanizer.randomUiNavDelayMs(fast))
+                    delay(1000L)
+                    continue
+                }
+                val promoPopup = findHybrid(config.promoBackKeywords, ocrLines)
+                if (promoPopup != null) {
+                    host.performGlobalBack("关闭推销层:${promoPopup.matchedKeyword}", fast)
+                    delay(1000L)
+                    continue
+                }
+
+                val alreadyUnlocked = findHybrid(
+                    keywords = config.unlockedKeywords,
+                    ocrLines = ocrLines,
+                    excludeContaining = listOf("看视频", "看广告", "领时长")
+                )
+                if (alreadyUnlocked != null) {
+                    publish(TaskPhase.COMPLETED, "今日已达上限（${alreadyUnlocked.fullText}）")
+                    return
+                }
+
+                // 场景 9：匹配畅听入口（含抽屉「提前领」、福利页「领时长」、以及截图4播放页右下「免费听 2天」胶囊！）
+                val entryMatch = findBestEntryButton(config, ocrLines, screenW, screenH)
                 if (entryMatch != null) {
                     unknownTicks = 0
-                    welfareNavAttempts = 0
-                    publish(TaskPhase.FINDING_ENTRY, "点击「${entryMatch.matchedKeyword}」开启第 ${completedAds + 1} 轮...")
-                    AppLogBus.info("命中入口[${entryMatch.source}]：「${entryMatch.fullText}」")
+                    goldCoinAttempts = 0
+                    publish(TaskPhase.FINDING_ENTRY, "点击「${entryMatch.fullText.take(10)}」进入看视频...")
+                    AppLogBus.info("命中入口[${entryMatch.source}]：「${entryMatch.fullText}」${entryMatch.bounds.toShortString()}")
                     host.performSmartTap(
                         match = entryMatch,
                         reason = "点击入口:${entryMatch.matchedKeyword}",
@@ -507,60 +581,65 @@ class TaskStateMachine(
                     continue
                 }
 
-                // 场景 10：从首页/播放页快速切入底栏「福利」
-                val onWelfarePage = findHybrid(
-                    keywords = listOf("福利中心", "免费听时长", "去提现", "金币收益"),
+                // 场景 10：在截图4播放页面（底栏为「发现|听抖音|暂停|会员|我的」，无「福利」文字时）
+                // -> 直接点击截图4右上角（搜索放大镜左侧、与「模式选择」同行）的金色金币图标打开「领时长」页！
+                val onPlayerHome = findHybrid(
+                    keywords = listOf("模式选择", "听抖音"),
+                    ocrLines = ocrLines
+                ) != null
+                val onWelfareDrawer = findHybrid(
+                    keywords = listOf("金币收益", "去提现", "福利中心"),
                     ocrLines = ocrLines
                 ) != null
 
-                if (!onWelfarePage) {
-                    val bottomBarFilter: (Rect) -> Boolean = { rect ->
-                        rect.top >= (screenH * 0.85f).toInt() && rect.bottom <= (screenH * 0.965f).toInt()
-                    }
-                    val welfareTab = findHybrid(
-                        keywords = config.welfareTabKeywords,
-                        ocrLines = ocrLines,
-                        regionPredicate = bottomBarFilter
-                    )
-                    if (welfareTab != null) {
-                        welfareNavAttempts++
-                        unknownTicks = 0
-                        publish(TaskPhase.NAVIGATING_WELFARE, "切换到底栏「福利」...")
-                        host.performSmartTap(
-                            match = welfareTab,
-                            reason = "切换底栏福利页",
-                            delayMs = Humanizer.randomUiNavDelayMs(fast),
-                            preferNodeAction = true
-                        )
-                        delay(1500L)
-                        continue
-                    }
+                if (onPlayerHome && !onWelfareDrawer && goldCoinAttempts < 3) {
+                    goldCoinAttempts++
+                    unknownTicks = 0
+                    publish(TaskPhase.NAVIGATING_WELFARE, "点击播放页右上角金币图标打开福利页...")
 
-                    // 精确避开荣耀/华为底部全面屏横条（控制在 90.8%~94.0% 高度区间，中心恰好对应实测生效点 y≈2608）
-                    if (welfareNavAttempts < 3) {
-                        welfareNavAttempts++
-                        val fallbackTabRect = Rect(
-                            (screenW * 0.64f).toInt(),
-                            (screenH * 0.908f).toInt(),
-                            (screenW * 0.70f).toInt(),
-                            (screenH * 0.940f).toInt()
+                    // 优先找右上角金币无障碍节点；若无节点则与左上角「模式选择」同一水平线取 x=82% 精准点击
+                    val coinNode = host.findTopRightGoldCoinNode(screenW, screenH)
+                    if (coinNode != null) {
+                        AppLogBus.info("点击播放页右上角金币节点 ${coinNode.bounds.toShortString()}")
+                        host.performSmartTap(coinNode, "右上角金币图标", Humanizer.randomUiNavDelayMs(fast))
+                    } else {
+                        val modeSelectHit = findHybrid(
+                            keywords = listOf("模式选择"),
+                            ocrLines = ocrLines,
+                            regionPredicate = { it.bottom <= (screenH * 0.14f).toInt() }
                         )
-                        publish(TaskPhase.NAVIGATING_WELFARE, "快速点击底栏「福利」槽位...")
-                        host.performHumanTap(
-                            bounds = fallbackTabRect,
-                            reason = "底栏福利槽位",
-                            delayMs = Humanizer.randomUiNavDelayMs(fast)
+                        val coinCenterY = modeSelectHit?.bounds?.centerY() ?: (screenH * 0.064f).toInt()
+                        val coinRect = Rect(
+                            (screenW * 0.795f).toInt(),
+                            coinCenterY - 24,
+                            (screenW * 0.842f).toInt(),
+                            coinCenterY + 24
                         )
-                        delay(1500L)
-                        continue
+                        AppLogBus.info("点击播放页右上角金币坐标 ${coinRect.toShortString()}")
+                        host.performHumanTap(coinRect, "右上角金币坐标", Humanizer.randomUiNavDelayMs(fast))
                     }
+                    delay(1500L)
+                    continue
+                }
+
+                // 兼容部分版本底栏确实写着「福利」二字的情况（严格匹配文字，不再盲点「会员」位置）
+                val welfareTab = findHybrid(
+                    keywords = config.welfareTabKeywords,
+                    ocrLines = ocrLines,
+                    regionPredicate = { it.top >= (screenH * 0.85f).toInt() }
+                )
+                if (welfareTab != null && !onWelfareDrawer) {
+                    publish(TaskPhase.NAVIGATING_WELFARE, "切换到底栏「福利」...")
+                    host.performSmartTap(welfareTab, "切换底栏福利", Humanizer.randomUiNavDelayMs(fast), preferNodeAction = true)
+                    delay(1400L)
+                    continue
                 }
 
                 unknownTicks++
                 if (unknownTicks == 4 || unknownTicks == 6) {
-                    host.performGlobalBack("未知子页返回", fast)
+                    host.performGlobalBack("未知子页尝试返回", fast)
                 } else if (unknownTicks >= 8) {
-                    publish(TaskPhase.ERROR, "连续多次未找到入口，请复制日志检查")
+                    publish(TaskPhase.ERROR, "连续未找到领时长入口，请复制日志检查")
                     return
                 }
                 delay(Humanizer.randomPollIntervalMs(fast))
@@ -585,21 +664,45 @@ class TaskStateMachine(
         }
     }
 
+    /**
+     * 精准匹配入口按钮：
+     * 1. 优先匹配「提前领 / 领时长 / 看视频领时长 / 看视频免费听 / 立即解锁」；
+     * 2. 若在截图4播放页，匹配右下角「免费听 2天 / 免费听」胶囊按钮（严格限制在右侧控制栏或顶部，避免误点普通标题）。
+     */
     private fun findBestEntryButton(
         config: RuleConfig,
         ocrLines: List<OcrLineRecord>,
+        screenW: Int,
         screenH: Int
     ): TargetMatch? {
-        val excludeWords = listOf("金币", "宝箱", "元", "¥", "￥", "开通", "购买", "秒后", "秒可领")
-        val contentArea: (Rect) -> Boolean = { rect ->
-            rect.top >= (screenH * 0.12f).toInt() && rect.bottom <= (screenH * 0.92f).toInt()
-        }
-        return findHybrid(
-            keywords = config.entryKeywords,
-            ocrLines = ocrLines,
-            excludeContaining = excludeWords,
-            regionPredicate = contentArea
+        val baseExcludes = listOf(
+            "金币", "宝箱", "元", "¥", "￥", "开通", "购买", "免广告",
+            "秒后", "秒可领", "明日免费听", "后日免费听", "日免费听", "免费听时长", "免费听VIP"
         )
+        for (keyword in config.entryKeywords) {
+            val regionFilter: (Rect) -> Boolean = if (keyword == "免费听") {
+                // 截图4右下角「免费听 2天」位于 x > 60% W, y 在 75%~91% H（或旧版顶部导航栏 y < 18% H）
+                { rect ->
+                    (rect.left >= (screenW * 0.58f).toInt() &&
+                        rect.top >= (screenH * 0.74f).toInt() &&
+                        rect.bottom <= (screenH * 0.91f).toInt()) ||
+                        (rect.top >= 0 && rect.bottom <= (screenH * 0.18f).toInt())
+                }
+            } else {
+                { rect ->
+                    rect.top >= (screenH * 0.12f).toInt() && rect.bottom <= (screenH * 0.92f).toInt()
+                }
+            }
+
+            val hit = findHybrid(
+                keywords = listOf(keyword),
+                ocrLines = ocrLines,
+                excludeContaining = baseExcludes,
+                regionPredicate = regionFilter
+            )
+            if (hit != null) return hit
+        }
+        return null
     }
 
     private fun findHybrid(

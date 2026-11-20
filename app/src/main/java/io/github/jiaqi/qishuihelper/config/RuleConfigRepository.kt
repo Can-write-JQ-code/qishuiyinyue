@@ -63,7 +63,7 @@ class RuleConfigRepository(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "qishui_rule_config"
-        private const val CURRENT_SCHEMA_VERSION = 3
+        private const val CURRENT_SCHEMA_VERSION = 4
         private const val KEY_SCHEMA_VERSION = "schema_version"
         private const val KEY_TARGET_PACKAGE = "target_package"
         private const val KEY_MAX_ROUNDS = "max_rounds"

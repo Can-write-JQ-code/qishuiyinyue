@@ -72,7 +72,7 @@ class AdHelperAccessibilityService : AccessibilityService() {
             volumeGuard = volumeGuard
         )
         instance = this
-        AppLogBus.info("无障碍引擎 v1.2 已就绪（极速节点快检 + 广告内无缝连看）")
+        AppLogBus.info("无障碍引擎 v1.3 已就绪（适配最新播放页入口 + 截图级精准连看）")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -391,6 +391,39 @@ class AdHelperAccessibilityService : AccessibilityService() {
                 return TargetMatch(
                     matchedKeyword = "右上角×节点",
                     fullText = className.substringAfterLast('.'),
+                    bounds = Rect(rect),
+                    source = MatchSource.NODE,
+                    clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
+                )
+            }
+        }
+        return null
+    }
+
+    /**
+     * 匹配播放页右上角（搜索放大镜左侧、与「模式选择」同行）的金币福利图标节点
+     */
+    internal fun findTopRightGoldCoinNode(screenW: Int, screenH: Int): TargetMatch? {
+        val nodes = collectAllVisibleNodes()
+        if (nodes.isEmpty()) return null
+        val rect = Rect()
+        val minLeft = (screenW * 0.75f).toInt()
+        val maxRight = (screenW * 0.88f).toInt()
+        val minTop = (screenH * 0.035f).toInt()
+        val maxBottom = (screenH * 0.095f).toInt()
+
+        for (node in nodes) {
+            node.getBoundsInScreen(rect)
+            if (rect.left >= minLeft &&
+                rect.right <= maxRight &&
+                rect.top >= minTop &&
+                rect.bottom <= maxBottom &&
+                rect.width() in 24..160 &&
+                rect.height() in 24..160
+            ) {
+                return TargetMatch(
+                    matchedKeyword = "右上角金币图标",
+                    fullText = "顶部福利金币入口",
                     bounds = Rect(rect),
                     source = MatchSource.NODE,
                     clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)

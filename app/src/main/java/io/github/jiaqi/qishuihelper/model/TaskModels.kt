@@ -53,7 +53,8 @@ data class RuleConfig(
             "看视频免费听",
             "看视频解锁",
             "免费听整首",
-            "立即解锁"
+            "立即解锁",
+            "免费听"
         )
 
         val DEFAULT_WELFARE_TAB_KEYWORDS = listOf(
