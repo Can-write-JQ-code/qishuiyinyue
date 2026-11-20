@@ -97,14 +97,14 @@ class MainActivity : AppCompatActivity() {
         binding.btnSaveConfig.setOnClickListener {
             val saved = readConfigFromInputs()
             configRepo.save(saved)
-            AppLogBus.info("已保存规则配置（目标=${saved.targetPackage}，轮数=${saved.maxRounds}轮）")
+            AppLogBus.info("已保存配置（连看=${saved.maxRounds}轮, 极速=${saved.fastMode}, 仅今日=${saved.stopOnTomorrow}）")
             Toast.makeText(this, "规则配置已保存", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnResetConfig.setOnClickListener {
             val defaults = configRepo.resetToDefault()
             bindConfigToInputs(defaults)
-            AppLogBus.info("已重置为最新默认规则配置")
+            AppLogBus.info("已重置为 v1.2 默认极速连看配置")
             Toast.makeText(this, "已恢复默认配置", Toast.LENGTH_SHORT).show()
         }
 
@@ -143,7 +143,6 @@ class MainActivity : AppCompatActivity() {
             val ok = AdHelperAccessibilityService.requestShowPinnedOverlay()
             if (ok) {
                 Toast.makeText(this, "悬浮窗已开启，现在可打开汽水音乐点「▶ 启动」", Toast.LENGTH_LONG).show()
-                // 顺手尝试切到汽水音乐方便用户操作
                 packageManager.getLaunchIntentForPackage(latestConfig.targetPackage)?.let {
                     it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
                     runCatching { startActivity(it) }
@@ -156,7 +155,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnStopTask.setOnClickListener {
             AdHelperAccessibilityService.requestStopTask("已在控制台手动停止")
             VolumeGuard(this).restoreIfNeeded()
-            Toast.makeText(this, "已发送停止指令并恢复原音量", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "已停止并恢复原音量", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnCopyLogs.setOnClickListener {
@@ -179,7 +178,7 @@ class MainActivity : AppCompatActivity() {
         if (isAccessibilityEnabled()) return true
         MaterialAlertDialogBuilder(this)
             .setTitle("请先开启无障碍服务")
-            .setMessage("需要开启「${getString(R.string.accessibility_service_label)}」才能识别福利页「领时长」与激励视频状态。\n\n若开关呈灰色提示「受限设置」，请先点「受限设置说明」。")
+            .setMessage("需要开启「${getString(R.string.accessibility_service_label)}」才能执行极速连看。\n\n若开关呈灰色提示「受限设置」，请先点「受限设置说明」。")
             .setPositiveButton("去开启") { _, _ ->
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
@@ -212,7 +211,7 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     AppLogBus.logs.collect { lines ->
                         binding.tvLogs.text = if (lines.isEmpty()) {
-                            "等待任务启动（启动后此处会实时打印每一帧读到的节点与 OCR 文字）..."
+                            "等待任务启动..."
                         } else {
                             lines.joinToString("\n")
                         }
@@ -312,7 +311,9 @@ class MainActivity : AppCompatActivity() {
         binding.etTargetPackage.setText(config.targetPackage)
         binding.etMaxRounds.setText(config.maxRounds.toString())
         binding.etSingleTimeoutSec.setText(config.singleAdTimeoutSec.toString())
+        binding.switchFastMode.isChecked = config.fastMode
         binding.switchAutoMute.isChecked = config.autoMuteMedia
+        binding.switchStopOnTomorrow.isChecked = config.stopOnTomorrow
         binding.etEntryKeywords.setText(RuleConfigRepository.joinPipeList(config.entryKeywords))
         binding.etUnlockedKeywords.setText(RuleConfigRepository.joinPipeList(config.unlockedKeywords))
         binding.etRewardDoneKeywords.setText(RuleConfigRepository.joinPipeList(config.rewardDoneKeywords))
@@ -324,11 +325,13 @@ class MainActivity : AppCompatActivity() {
         val defaults = RuleConfig()
         val pkg = binding.etTargetPackage.text?.toString()?.trim().orEmpty()
             .ifEmpty { defaults.targetPackage }
-        val rounds = binding.etMaxRounds.text?.toString()?.toIntOrNull()?.coerceIn(1, 10)
+        val rounds = binding.etMaxRounds.text?.toString()?.toIntOrNull()?.coerceIn(1, 30)
             ?: defaults.maxRounds
         val timeout = binding.etSingleTimeoutSec.text?.toString()?.toIntOrNull()?.coerceIn(45, 120)
             ?: defaults.singleAdTimeoutSec
+        val fastMode = binding.switchFastMode.isChecked
         val autoMute = binding.switchAutoMute.isChecked
+        val stopOnTomorrow = binding.switchStopOnTomorrow.isChecked
 
         val entry = RuleConfigRepository.parsePipeInput(binding.etEntryKeywords.text?.toString().orEmpty())
             .ifEmpty { defaults.entryKeywords }
@@ -346,6 +349,8 @@ class MainActivity : AppCompatActivity() {
             maxRounds = rounds,
             singleAdTimeoutSec = timeout,
             autoMuteMedia = autoMute,
+            fastMode = fastMode,
+            stopOnTomorrow = stopOnTomorrow,
             entryKeywords = entry,
             unlockedKeywords = unlocked,
             rewardDoneKeywords = done,

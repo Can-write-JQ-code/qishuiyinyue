@@ -8,8 +8,8 @@ enum class TaskPhase(val label: String, val isRunning: Boolean) {
     LAUNCHING_APP("拉起汽水音乐", true),
     NAVIGATING_WELFARE("进入福利中心", true),
     FINDING_ENTRY("点击领时长入口", true),
-    WATCHING_AD("看广告守护中", true),
-    HANDLING_POPUP("处理弹窗/连看", true),
+    WATCHING_AD("看广告连看中", true),
+    HANDLING_POPUP("极速连看切换", true),
     COMPLETED("已完成畅听领取", false),
     STOPPED("已手动停止", false),
     ERROR("中止或频控保护", false)
@@ -17,9 +17,11 @@ enum class TaskPhase(val label: String, val isRunning: Boolean) {
 
 data class RuleConfig(
     val targetPackage: String = DEFAULT_TARGET_PACKAGE,
-    val maxRounds: Int = 2,
+    val maxRounds: Int = 4,
     val singleAdTimeoutSec: Int = 65,
     val autoMuteMedia: Boolean = true,
+    val fastMode: Boolean = true,
+    val stopOnTomorrow: Boolean = false,
     val entryKeywords: List<String> = DEFAULT_ENTRY_KEYWORDS,
     val unlockedKeywords: List<String> = DEFAULT_UNLOCKED_KEYWORDS,
     val rewardDoneKeywords: List<String> = DEFAULT_REWARD_DONE_KEYWORDS,
@@ -38,9 +40,10 @@ data class RuleConfig(
         const val DEFAULT_TARGET_PACKAGE = "com.luna.music"
 
         /**
-         * 汽水音乐 v19~v21 真实畅听领取入口词（福利中心「领时长」为主，兼容首页弹窗与顶部入口）
+         * 优先匹配福利底部抽屉「提前领」（如「再看1个提前领」），避免先点背景关抽屉再点第二次
          */
         val DEFAULT_ENTRY_KEYWORDS = listOf(
+            "提前领",
             "领时长",
             "看视频领时长",
             "看广告领时长",
@@ -60,13 +63,9 @@ data class RuleConfig(
         val DEFAULT_UNLOCKED_KEYWORDS = listOf(
             "今日已领完",
             "今日次数已达上限",
-            "全天免费畅听中",
-            "今日畅听已解锁"
+            "全天免费畅听中"
         )
 
-        /**
-         * 激励广告倒计时结束标识（兼容 UIView desc="领取成功，关闭，按钮" 与右上角胶囊）
-         */
         val DEFAULT_REWARD_DONE_KEYWORDS = listOf(
             "领取成功，关闭",
             "领取成功",
@@ -76,13 +75,13 @@ data class RuleConfig(
         )
 
         /**
-         * 广告结束后中间弹窗继续看下一条的按钮词（汽水音乐弹窗主按钮常为「领取奖励 / 再看一个 / 继续观看」）
+         * 广告结束后弹窗内直接连看下一条的主按钮（「领取奖励」点下去会直接在广告容器内无缝播放下一条！）
          */
         val DEFAULT_NEXT_AD_KEYWORDS = listOf(
+            "领取奖励",
             "再看一个",
             "再看1个",
-            "继续观看",
-            "领取奖励"
+            "继续观看"
         )
 
         val DEFAULT_EXIT_AD_CONFIRM_KEYWORDS = listOf(
@@ -150,9 +149,9 @@ data class RuleConfig(
 data class TaskStatus(
     val phase: TaskPhase = TaskPhase.IDLE,
     val currentRound: Int = 0,
-    val maxRounds: Int = 2,
+    val maxRounds: Int = 4,
     val roundElapsedSec: Int = 0,
-    val detail: String = "支持一键全自动启动，或开启悬浮窗后去汽水音乐内点 ▶ 启动"
+    val detail: String = "v1.2 极速连看版：在广告弹窗内直接连续看满设定轮数"
 )
 
 enum class MatchSource {

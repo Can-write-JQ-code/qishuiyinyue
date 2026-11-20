@@ -17,9 +17,9 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="畅听自动化助手 v1.1"
+            android:text="畅听自动化助手 v1.2 极速连看版"
             android:textColor="@color/text_primary"
-            android:textSize="22sp"
+            android:textSize="21sp"
             android:textStyle="bold" />
 
         <TextView
@@ -27,7 +27,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:layout_marginBottom="14dp"
-            android:text="自动进【福利】点【领时长】 · 多窗口穿透 + 离线中文 OCR · 自动静音防误跳"
+            android:text="广告内直接无缝连看 · 零截屏节点极速快检 · 自动静音与防误跳"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
@@ -72,7 +72,6 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
-                <!-- 无障碍 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -100,7 +99,6 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
-                <!-- 悬浮窗 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -113,7 +111,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="悬浮窗胶囊（推荐）：检测中..."
+                        android:text="悬浮窗胶囊：检测中..."
                         android:textColor="@color/text_primary"
                         android:textSize="14sp" />
 
@@ -128,7 +126,6 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
-                <!-- 电池优化 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -205,7 +202,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="可直接点下方一键全自动运行，或先挂起悬浮窗后手动打开汽水音乐在任意页点 ▶ 启动。"
+                    android:text="看完第 1 条后将在弹窗内直接点「领取奖励」无缝连看下一条，直至达到设定轮数。"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
@@ -214,7 +211,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="48dp"
                     android:layout_marginTop="12dp"
-                    android:text="一键全自动领畅听（自动拉起汽水）"
+                    android:text="一键极速连看（自动拉起汽水）"
                     android:textSize="15sp"
                     android:textStyle="bold" />
 
@@ -266,7 +263,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="3. 策略与关键词规则（已内置最新福利页规则）"
+                    android:text="3. 连看轮数与速度策略"
                     android:textColor="@color/text_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -276,7 +273,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="10dp"
-                    android:text="默认观看 2 轮广告解锁当日畅听；若需多攒天数可将轮数调大（1-10）。"
+                    android:text="支持连续连看 1-30 轮攒多日免费畅听；默认 4 轮（约 2 天畅听时长）。"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
@@ -303,7 +300,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:hint="每次观看广告轮数 (1-10)">
+                        android:hint="连续观看广告轮数 (1-30)">
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/etMaxRounds"
@@ -330,14 +327,32 @@
                 </LinearLayout>
 
                 <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switchAutoMute"
+                    android:id="@+id/switchFastMode"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:checked="true"
+                    android:text="极速响应模式（0.3~0.7s 快速点关与连看，跳过冗余截屏）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13.5sp" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switchAutoMute"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
                     android:text="执行期间自动系统静音，结束后恢复原媒体音量"
                     android:textColor="@color/text_primary"
-                    android:textSize="14sp" />
+                    android:textSize="13.5sp" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switchStopOnTomorrow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:checked="false"
+                    android:text="仅领满今日即停（关闭则继续连看提前攒明日/多日时长）"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13.5sp" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
@@ -382,7 +397,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:hint="连看下一轮弹窗按钮词（| 分隔）">
+                    android:hint="弹窗内直接连看下一轮按钮词（| 分隔）">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etNextAdKeywords"
@@ -494,7 +509,7 @@
                         android:layout_height="wrap_content"
                         android:fontFamily="monospace"
                         android:lineSpacingExtra="3dp"
-                        android:text="等待任务启动（启动后此处会实时打印每一帧读到的节点与 OCR 文字）..."
+                        android:text="等待任务启动..."
                         android:textColor="@color/text_log"
                         android:textIsSelectable="true"
                         android:textSize="11.5sp" />

@@ -161,7 +161,7 @@ class FloatingOverlayManager(
         withContext(Dispatchers.Main) {
             root.alpha = 0f
         }
-        delay(55L)
+        delay(25L)
         return try {
             block()
         } finally {

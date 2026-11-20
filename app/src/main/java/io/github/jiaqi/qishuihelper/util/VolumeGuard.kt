@@ -8,6 +8,7 @@ class VolumeGuard(context: Context) {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private var loggedSilentOnce = false
 
     fun muteIfNeeded(enabled: Boolean) {
         if (!enabled) return
@@ -19,16 +20,19 @@ class VolumeGuard(context: Context) {
                     .putBoolean(KEY_MUTED_BY_HELPER, true)
                     .apply()
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+                loggedSilentOnce = true
                 AppLogBus.info("音量守护：已备份媒体音量($current)并切换为系统静音")
-            } else {
+            } else if (!loggedSilentOnce) {
+                loggedSilentOnce = true
                 AppLogBus.info("音量守护：当前媒体音量已为 0，保持静音")
             }
         }.onFailure { err ->
-            AppLogBus.warn("静音设置失败（可能受系统勿扰策略限制）：${err.message}")
+            AppLogBus.warn("静音设置失败：${err.message}")
         }
     }
 
     fun restoreIfNeeded() {
+        loggedSilentOnce = false
         val mutedByHelper = prefs.getBoolean(KEY_MUTED_BY_HELPER, false)
         if (!mutedByHelper) return
 

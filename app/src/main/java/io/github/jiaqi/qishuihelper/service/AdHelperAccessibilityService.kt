@@ -43,8 +43,14 @@ class AdHelperAccessibilityService : AccessibilityService() {
     @Volatile
     private var latestPackageName: String = ""
 
+    /**
+     * 仅记录真正的 Activity 类名（防止 VolumeDialog / CommonLoadingDialog / KeyboardMonitor 覆盖真实顶层 Activity）
+     */
     @Volatile
     private var latestActivityClass: String = ""
+
+    @Volatile
+    private var latestWindowClass: String = ""
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -66,7 +72,7 @@ class AdHelperAccessibilityService : AccessibilityService() {
             volumeGuard = volumeGuard
         )
         instance = this
-        AppLogBus.info("无障碍引擎已连接就绪（支持多窗口穿透检索 + 静默截屏 OCR）")
+        AppLogBus.info("无障碍引擎 v1.2 已就绪（极速节点快检 + 广告内无缝连看）")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -77,13 +83,11 @@ class AdHelperAccessibilityService : AccessibilityService() {
             if (pkg.isNotEmpty() && pkg != "com.android.systemui" && pkg != packageName) {
                 latestPackageName = pkg
             }
-            if (cls.isNotEmpty() &&
-                pkg != packageName &&
-                !cls.startsWith("android.widget.") &&
-                !cls.startsWith("android.view.") &&
-                !cls.startsWith("androidx.")
-            ) {
-                latestActivityClass = cls
+            if (cls.isNotEmpty() && pkg != packageName) {
+                latestWindowClass = cls
+                if (cls.endsWith("Activity")) {
+                    latestActivityClass = cls
+                }
             }
         }
     }
@@ -120,13 +124,13 @@ class AdHelperAccessibilityService : AccessibilityService() {
         }
         val config = configRepo.load()
         overlayManager.showIfPermitted(pinnedWhenIdle = fromFloatingButton)
-        KeepAliveForegroundService.startOrUpdate(this, "正在执行畅听自动化任务...")
+        KeepAliveForegroundService.startOrUpdate(this, "正在执行极速连看任务...")
 
         runningJob = serviceScope.launch {
             try {
                 stateMachine.execute(config, startedFromOverlay = fromFloatingButton)
             } finally {
-                delay(2800L)
+                delay(2200L)
                 if (runningJob?.isActive != true) {
                     overlayManager.onTaskFinished()
                 }
@@ -166,9 +170,6 @@ class AdHelperAccessibilityService : AccessibilityService() {
         }
     }
 
-    /**
-     * 通过多窗口列表 + 活动窗口联合判断当前前台真实应用包名（规避悬浮窗抢焦点导致 rootInActiveWindow 为空或误指本应用）
-     */
     internal fun getCurrentPackageName(): String {
         val appRoots = getTargetWindowRoots()
         val windowPkg = appRoots.firstOrNull()?.packageName?.toString().orEmpty()
@@ -181,6 +182,8 @@ class AdHelperAccessibilityService : AccessibilityService() {
     }
 
     internal fun getCurrentActivityClass(): String = latestActivityClass
+
+    internal fun getLatestWindowClass(): String = latestWindowClass
 
     internal fun getScreenSize(): Pair<Int, Int> {
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -202,9 +205,6 @@ class AdHelperAccessibilityService : AccessibilityService() {
         }
     }
 
-    /**
-     * 获取当前屏幕所有非自身、非系统栏的应用窗口根节点（解决 MIUI/OriginOS/ColorOS 下弹窗或有悬浮窗时 rootInActiveWindow 拿不到节点的问题）
-     */
     private fun getTargetWindowRoots(): List<AccessibilityNodeInfo> {
         val result = ArrayList<AccessibilityNodeInfo>(4)
         runCatching {
@@ -251,10 +251,7 @@ class AdHelperAccessibilityService : AccessibilityService() {
         }
     }
 
-    /**
-     * 输出当前无障碍节点与 OCR 识别摘要，彻底消除黑盒盲猜
-     */
-    internal fun collectNodeTextPreview(maxItems: Int = 10): List<String> {
+    internal fun collectNodeTextPreview(maxItems: Int = 8): List<String> {
         val nodes = collectAllVisibleNodes()
         val texts = LinkedHashSet<String>()
         for (node in nodes) {
@@ -265,9 +262,6 @@ class AdHelperAccessibilityService : AccessibilityService() {
         return texts.toList()
     }
 
-    /**
-     * 遍历所有可见窗口节点匹配关键词（同时支持 text 与 contentDescription，并自动回溯可点击父节点）
-     */
     internal fun findNodeMatch(
         keywords: List<String>,
         excludeContaining: List<String> = emptyList(),
@@ -326,7 +320,6 @@ class AdHelperAccessibilityService : AccessibilityService() {
         while (cur != null && depth < 5) {
             if (cur.isClickable) {
                 cur.getBoundsInScreen(r)
-                // 避免回溯到占满全屏的根容器导致点歪
                 if (r.width() < (screenW * 0.92f).toInt() && r.height() < (screenH * 0.45f).toInt()) {
                     return cur
                 }
@@ -337,12 +330,6 @@ class AdHelperAccessibilityService : AccessibilityService() {
         return null
     }
 
-    /**
-     * 针对汽水音乐激励广告倒计时结束后的右上角关闭控件探测（融合开源 GKD 实测选择器特征）：
-     * 1. desc/text 含「领取成功」且含「关闭」的按钮节点；
-     * 2. 紧邻「领取成功」右侧的可点击小节点（@TextView[clickable=true] - [text="领取成功"]）；
-     * 3. 屏幕右上角 (x > 74% W, y < 16% H) 尺寸合理的独立可点击或小图标节点。
-     */
     internal fun findAdCloseNodeTarget(
         rewardBounds: Rect?,
         screenW: Int,
@@ -352,10 +339,9 @@ class AdHelperAccessibilityService : AccessibilityService() {
         if (nodes.isEmpty()) return null
         val rect = Rect()
 
-        // 1) 精确匹配 desc/text="领取成功，关闭，按钮"
         for (node in nodes) {
             val label = (node.contentDescription?.toString() ?: "") + " " + (node.text?.toString() ?: "")
-            if (label.contains("领取成功") && label.contains("关闭")) {
+            if (label.contains("领取成功") && label.contains("关闭") && !label.contains("秒后")) {
                 node.getBoundsInScreen(rect)
                 if (rect.width() > 6 && rect.height() > 6) {
                     return TargetMatch(
@@ -369,7 +355,6 @@ class AdHelperAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 2) 若已知「领取成功」文字框位置，优先找它右侧同一水平高度的 × 节点
         if (rewardBounds != null) {
             for (node in nodes) {
                 node.getBoundsInScreen(rect)
@@ -391,7 +376,6 @@ class AdHelperAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 3) 右上角标准关闭图标区兜底
         val minLeft = (screenW * 0.75f).toInt()
         val maxBottom = (screenH * 0.16f).toInt()
         for (node in nodes) {
@@ -425,24 +409,22 @@ class AdHelperAccessibilityService : AccessibilityService() {
         }
     }
 
-    /**
-     * 混合点击：优先派发拟人手势点击；若国产 ROM 未开「USB调试(安全设置)」导致手势被取消，自动回退无障碍节点 ACTION_CLICK
-     */
     internal suspend fun performSmartTap(
         match: TargetMatch,
         reason: String,
+        delayMs: Long,
         preferNodeAction: Boolean = false
     ): Boolean {
-        val waitMs = Humanizer.randomReactionDelayMs()
-        AppLogBus.info("准备点击[$reason] 坐标=${match.bounds.toShortString()}（等待 ${waitMs}ms）")
-        delay(waitMs)
+        if (delayMs > 0L) {
+            delay(delayMs)
+        }
 
         if (preferNodeAction && match.clickableNode != null) {
             val nodeClicked = runCatching {
                 match.clickableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             }.getOrDefault(false)
             if (nodeClicked) {
-                AppLogBus.info("已通过节点动作点击[$reason]")
+                AppLogBus.info("已通过节点快速点击[$reason]")
                 return true
             }
         }
@@ -458,10 +440,10 @@ class AdHelperAccessibilityService : AccessibilityService() {
         return dispatched
     }
 
-    internal suspend fun performHumanTap(bounds: Rect, reason: String): Boolean {
-        val waitMs = Humanizer.randomReactionDelayMs()
-        AppLogBus.info("准备点击[$reason] 区域=${bounds.toShortString()}（等待 ${waitMs}ms）")
-        delay(waitMs)
+    internal suspend fun performHumanTap(bounds: Rect, reason: String, delayMs: Long): Boolean {
+        if (delayMs > 0L) {
+            delay(delayMs)
+        }
         return dispatchHumanTapAtBounds(bounds, reason)
     }
 
@@ -491,13 +473,13 @@ class AdHelperAccessibilityService : AccessibilityService() {
         if (dispatched) {
             AppLogBus.info("已点击[$reason] -> (${point.x.toInt()}, ${point.y.toInt()})")
         } else {
-            AppLogBus.warn("手势点击未生效[$reason]（小米/vivo/OPPO请检查开发者选项「USB调试(安全设置)」）")
+            AppLogBus.warn("手势点击未生效[$reason]（请检查开发者选项「USB调试(安全设置)」）")
         }
         return dispatched
     }
 
-    internal suspend fun performGlobalBack(reason: String) {
-        delay(Humanizer.randomBackDelayMs())
+    internal suspend fun performGlobalBack(reason: String, fastMode: Boolean = true) {
+        delay(Humanizer.randomBackDelayMs(fastMode))
         val ok = performGlobalAction(GLOBAL_ACTION_BACK)
         AppLogBus.info("执行全局返回[$reason] -> result=$ok")
     }

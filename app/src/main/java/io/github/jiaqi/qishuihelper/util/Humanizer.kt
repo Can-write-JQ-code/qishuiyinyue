@@ -11,28 +11,67 @@ import kotlin.random.Random
 object Humanizer {
 
     /**
-     * 轮询间隔随机抖动（2.4s ~ 3.6s），规避恒定频率轮询特征
+     * 轮询间隔：极速模式 1.15s ~ 1.55s，常规模式 2.1s ~ 2.9s
      */
-    fun randomPollIntervalMs(): Long = Random.nextLong(2400L, 3600L)
+    fun randomPollIntervalMs(fastMode: Boolean = true): Long {
+        return if (fastMode) {
+            Random.nextLong(1150L, 1550L)
+        } else {
+            Random.nextLong(2100L, 2900L)
+        }
+    }
 
     /**
-     * 识别到目标按钮后的拟人反应延迟（1.2s ~ 3.1s）
+     * 普通界面导航点击前延迟（跳开屏、切福利页、点领时长）：极速模式仅 200ms ~ 420ms
      */
-    fun randomReactionDelayMs(): Long = Random.nextLong(1200L, 3100L)
+    fun randomUiNavDelayMs(fastMode: Boolean = true): Long {
+        return if (fastMode) {
+            Random.nextLong(200L, 420L)
+        } else {
+            Random.nextLong(650L, 1200L)
+        }
+    }
 
     /**
-     * 误跳偏离后触发返回前的短延迟（0.85s ~ 1.45s）
+     * 广告关键按钮点击前拟人延迟（关广告、点领取奖励连看）：极速模式 340ms ~ 720ms，兼顾自然度与爽快感
      */
-    fun randomBackDelayMs(): Long = Random.nextLong(850L, 1450L)
+    fun randomAdActionDelayMs(fastMode: Boolean = true): Long {
+        return if (fastMode) {
+            Random.nextLong(340L, 720L)
+        } else {
+            Random.nextLong(1000L, 2100L)
+        }
+    }
 
     /**
-     * 在目标矩形框内生成带中心聚集趋势的随机点击坐标（偏移控制在 ±8~15px 且不越出按钮安全边界）
+     * 点击后界面过渡等待时间
+     */
+    fun randomPostActionSettleMs(fastMode: Boolean = true): Long {
+        return if (fastMode) {
+            Random.nextLong(1100L, 1450L)
+        } else {
+            Random.nextLong(1800L, 2400L)
+        }
+    }
+
+    /**
+     * 返回键前短延迟
+     */
+    fun randomBackDelayMs(fastMode: Boolean = true): Long {
+        return if (fastMode) {
+            Random.nextLong(320L, 620L)
+        } else {
+            Random.nextLong(750L, 1250L)
+        }
+    }
+
+    /**
+     * 在目标矩形框内生成带中心聚集趋势的随机点击坐标（偏移控制在 ±8~15px 且不越出安全边界）
      */
     fun computeTapPoint(bounds: Rect, screenWidth: Int, screenHeight: Int): PointF {
         val safeMaxOffsetX = min(15f, max(2f, bounds.width() * 0.28f))
         val safeMaxOffsetY = min(12f, max(2f, bounds.height() * 0.28f))
 
-        // 两次均匀分布求均值，形成以中心为峰值的三角拟人分布
         val offsetX = ((Random.nextFloat() - 0.5f) + (Random.nextFloat() - 0.5f)) * safeMaxOffsetX
         val offsetY = ((Random.nextFloat() - 0.5f) + (Random.nextFloat() - 0.5f)) * safeMaxOffsetY
 
@@ -45,10 +84,10 @@ object Humanizer {
     }
 
     /**
-     * 构造带随机按压时长（65ms ~ 135ms）及 0~2px 自然手指微滑移的点击手势
+     * 构造带随机按压时长（58ms ~ 118ms）及 0~2px 自然微滑移的手势
      */
     fun buildHumanTapGesture(point: PointF): GestureDescription {
-        val durationMs = Random.nextLong(65L, 136L)
+        val durationMs = Random.nextLong(58L, 118L)
         val driftX = (point.x + Random.nextInt(-2, 3)).coerceAtLeast(1f)
         val driftY = (point.y + Random.nextInt(-2, 3)).coerceAtLeast(1f)
 
