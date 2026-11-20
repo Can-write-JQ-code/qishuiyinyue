@@ -33,8 +33,6 @@ class FloatingOverlayManager(
     private var isAdded = false
     private var keepPinnedWhenIdle = false
 
-    fun isShowing(): Boolean = isAdded
-
     @SuppressLint("ClickableViewAccessibility")
     fun showIfPermitted(pinnedWhenIdle: Boolean = keepPinnedWhenIdle) {
         keepPinnedWhenIdle = keepPinnedWhenIdle || pinnedWhenIdle
@@ -44,6 +42,7 @@ class FloatingOverlayManager(
             val themedContext = ContextThemeWrapper(appContext, R.style.Theme_QishuiAdHelper)
             val vb = ViewFloatingCapsuleBinding.inflate(LayoutInflater.from(themedContext))
 
+            // 默认停靠在屏幕左上偏下空白黑边区 (y≈17% 处)，完全避开右上角「领取成功」与正中「领取奖励」区域
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -52,19 +51,13 @@ class FloatingOverlayManager(
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = Gravity.TOP or Gravity.END
-                x = 18
-                y = 300
+                gravity = Gravity.TOP or Gravity.START
+                x = 14
+                y = 440
             }
 
-            vb.btnCapsuleStart.setOnClickListener {
-                onStartClicked.invoke()
-            }
-
-            vb.btnCapsuleStop.setOnClickListener {
-                onStopClicked.invoke()
-            }
-
+            vb.btnCapsuleStart.setOnClickListener { onStartClicked.invoke() }
+            vb.btnCapsuleStop.setOnClickListener { onStopClicked.invoke() }
             vb.btnCapsuleClose.setOnClickListener {
                 keepPinnedWhenIdle = false
                 onStopClicked.invoke()
@@ -88,7 +81,7 @@ class FloatingOverlayManager(
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val dx = (downRawX - event.rawX).toInt()
+                        val dx = (event.rawX - downRawX).toInt()
                         val dy = (event.rawY - downRawY).toInt()
                         if (abs(dx) > 6 || abs(dy) > 6) {
                             dragging = true
@@ -121,8 +114,9 @@ class FloatingOverlayManager(
         vb.btnCapsuleStop.visibility = if (running) View.VISIBLE else View.GONE
         vb.btnCapsuleClose.visibility = if (running) View.GONE else View.VISIBLE
 
-        val roundInfo = if (status.currentRound > 0 || running) {
-            "[${status.currentRound}/${status.maxRounds}] "
+        val targetStr = if (status.infiniteMode) "∞" else status.maxRounds.toString()
+        val roundInfo = if (running || status.currentRound > 0) {
+            "[${status.currentRound}/$targetStr] "
         } else {
             ""
         }
@@ -151,17 +145,21 @@ class FloatingOverlayManager(
     }
 
     /**
-     * 截屏 OCR 前短暂隐藏悬浮胶囊，避免遮挡汽水音乐按钮或识别进自身文字
+     * 仅当目标裁剪区与悬浮窗实际重叠时才短暂透明化悬浮窗，平时零闪烁、零额外延迟！
      */
-    suspend fun <T> withTemporarilyHidden(block: suspend () -> T): T {
+    suspend fun <T> withHiddenIfOverlaps(targetScreenRect: Rect?, block: suspend () -> T): T {
         val root = binding?.root
-        if (!isAdded || root == null) {
+        val myBounds = getBoundsOnScreen()
+        val overlaps = root != null && myBounds != null &&
+            (targetScreenRect == null || Rect.intersects(myBounds, targetScreenRect))
+
+        if (!overlaps || root == null) {
             return block()
         }
         withContext(Dispatchers.Main) {
             root.alpha = 0f
         }
-        delay(25L)
+        delay(22L)
         return try {
             block()
         } finally {

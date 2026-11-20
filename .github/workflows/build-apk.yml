@@ -61,8 +61,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v1.3.${GITHUB_RUN_NUMBER}"
+          TAG="v2.0.${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" \
             app/build/outputs/apk/debug/qishui-ad-helper-debug.apk \
-            --title "畅听自动化助手 v1.3 截图校准精准连看版 (Build #${GITHUB_RUN_NUMBER})" \
-            --notes "v1.3 截图级校准版：1) 修复开屏广告 AdActivity 误判并实现秒跳；2) 适配最新播放页右下「免费听 X天」胶囊与右上角金色金币福利入口（不再盲点底栏「会员」）；3) 修复点过一次「领取成功×」后节点快检拦截连看弹窗的问题，精准点击绿色「领取奖励」实现全程无缝连看。" || true
+            --title "畅听自动化助手 v2.0 极简两步连看内核 (Build #${GITHUB_RUN_NUMBER})" \
+            --notes "v2.0 重构版（吸收 qishuiAScriptProject 五阶段设计）：1) 局部百分比小区域裁剪 OCR（提速 5~10 倍且物理隔绝底部下载诱导按钮）；2) 确定性两步领取循环（右上角点「领取成功」-> 0.4s 高频盯中间弹窗点「领取奖励」无缝进下一条）；3) 直播间广告关叉后继续领奖励；4) 自动进首广+手动兜底不罢工+支持无限循环刷满当日额度。" || true

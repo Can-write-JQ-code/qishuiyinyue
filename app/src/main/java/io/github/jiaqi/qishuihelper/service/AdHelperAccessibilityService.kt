@@ -2,6 +2,7 @@ package io.github.jiaqi.qishuihelper.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Rect
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -9,6 +10,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import io.github.jiaqi.qishuihelper.config.RuleConfigRepository
 import io.github.jiaqi.qishuihelper.model.MatchSource
+import io.github.jiaqi.qishuihelper.model.PctRegion
 import io.github.jiaqi.qishuihelper.model.TargetMatch
 import io.github.jiaqi.qishuihelper.model.TaskPhase
 import io.github.jiaqi.qishuihelper.model.TaskStatus
@@ -43,14 +45,8 @@ class AdHelperAccessibilityService : AccessibilityService() {
     @Volatile
     private var latestPackageName: String = ""
 
-    /**
-     * 仅记录真正的 Activity 类名（防止 VolumeDialog / CommonLoadingDialog / KeyboardMonitor 覆盖真实顶层 Activity）
-     */
     @Volatile
     private var latestActivityClass: String = ""
-
-    @Volatile
-    private var latestWindowClass: String = ""
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -72,7 +68,7 @@ class AdHelperAccessibilityService : AccessibilityService() {
             volumeGuard = volumeGuard
         )
         instance = this
-        AppLogBus.info("无障碍引擎 v1.3 已就绪（适配最新播放页入口 + 截图级精准连看）")
+        AppLogBus.info("无障碍引擎 v2.0 已就绪（局部极速裁剪 OCR + 确定性两步连看内核）")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -83,17 +79,14 @@ class AdHelperAccessibilityService : AccessibilityService() {
             if (pkg.isNotEmpty() && pkg != "com.android.systemui" && pkg != packageName) {
                 latestPackageName = pkg
             }
-            if (cls.isNotEmpty() && pkg != packageName) {
-                latestWindowClass = cls
-                if (cls.endsWith("Activity")) {
-                    latestActivityClass = cls
-                }
+            if (cls.isNotEmpty() && pkg != packageName && cls.endsWith("Activity")) {
+                latestActivityClass = cls
             }
         }
     }
 
     override fun onInterrupt() {
-        AppLogBus.warn("无障碍服务收到系统中断通知")
+        AppLogBus.warn("无障碍服务收到中断通知")
     }
 
     override fun onDestroy() {
@@ -124,13 +117,13 @@ class AdHelperAccessibilityService : AccessibilityService() {
         }
         val config = configRepo.load()
         overlayManager.showIfPermitted(pinnedWhenIdle = fromFloatingButton)
-        KeepAliveForegroundService.startOrUpdate(this, "正在执行极速连看任务...")
+        KeepAliveForegroundService.startOrUpdate(this, "正在运行两步连看循环...")
 
         runningJob = serviceScope.launch {
             try {
                 stateMachine.execute(config, startedFromOverlay = fromFloatingButton)
             } finally {
-                delay(2200L)
+                delay(2000L)
                 if (runningJob?.isActive != true) {
                     overlayManager.onTaskFinished()
                 }
@@ -149,11 +142,12 @@ class AdHelperAccessibilityService : AccessibilityService() {
         if (wasRunning) {
             AppLogBus.info("已停止任务：$reason")
         }
-        val stoppedStatus = TaskStatus(
-            phase = TaskPhase.STOPPED,
-            detail = reason
+        AppLogBus.updateStatus(
+            TaskStatus(
+                phase = TaskPhase.STOPPED,
+                detail = reason
+            )
         )
-        AppLogBus.updateStatus(stoppedStatus)
         if (::overlayManager.isInitialized) {
             overlayManager.onTaskFinished()
         }
@@ -183,8 +177,6 @@ class AdHelperAccessibilityService : AccessibilityService() {
 
     internal fun getCurrentActivityClass(): String = latestActivityClass
 
-    internal fun getLatestWindowClass(): String = latestWindowClass
-
     internal fun getScreenSize(): Pair<Int, Int> {
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val bounds = wm.currentWindowMetrics.bounds
@@ -200,7 +192,7 @@ class AdHelperAccessibilityService : AccessibilityService() {
             startActivity(launchIntent)
             true
         }.getOrElse { err ->
-            AppLogBus.warn("拉起应用($targetPackage)失败：${err.message}")
+            AppLogBus.warn("启动目标应用失败：${err.message}")
             false
         }
     }
@@ -240,7 +232,7 @@ class AdHelperAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         out: MutableList<AccessibilityNodeInfo>
     ) {
-        if (out.size >= 600) return
+        if (out.size >= 500) return
         if (node.isVisibleToUser) {
             out.add(node)
         }
@@ -251,25 +243,18 @@ class AdHelperAccessibilityService : AccessibilityService() {
         }
     }
 
-    internal fun collectNodeTextPreview(maxItems: Int = 8): List<String> {
-        val nodes = collectAllVisibleNodes()
-        val texts = LinkedHashSet<String>()
-        for (node in nodes) {
-            node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { texts.add(it.take(18)) }
-            node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { texts.add(it.take(18)) }
-            if (texts.size >= maxItems) break
-        }
-        return texts.toList()
-    }
-
-    internal fun findNodeMatch(
+    /**
+     * 在指定百分比区域内检索无障碍节点（耗时 <2ms）
+     */
+    internal fun findNodeInRegion(
+        region: PctRegion,
         keywords: List<String>,
-        excludeContaining: List<String> = emptyList(),
-        regionPredicate: ((Rect) -> Boolean)? = null
+        excludeContaining: List<String> = emptyList()
     ): TargetMatch? {
         val nodes = collectAllVisibleNodes()
         if (nodes.isEmpty()) return null
         val (screenW, screenH) = getScreenSize()
+        val regionRect = region.toScreenRect(screenW, screenH)
 
         val rect = Rect()
         for (keyword in keywords) {
@@ -287,23 +272,198 @@ class AdHelperAccessibilityService : AccessibilityService() {
                     if (excludeContaining.any { ex -> normalized.contains(ScreenOcrHelper.normalizeText(ex)) }) {
                         continue
                     }
-                    if (cleanKey.length == 1 && normalized.length > 4) continue
+                    if (cleanKey.length == 1 && normalized.length > 3) continue
                     if (!normalized.contains(cleanKey)) continue
 
                     node.getBoundsInScreen(rect)
                     if (rect.width() <= 4 || rect.height() <= 4) continue
-                    val copyRect = Rect(rect)
-                    if (regionPredicate != null && !regionPredicate(copyRect)) continue
+                    if (!regionRect.contains(rect.centerX(), rect.centerY())) continue
 
-                    val clickable = findClickableSelfOrAncestor(node, screenW, screenH)
                     return TargetMatch(
                         matchedKeyword = keyword,
                         fullText = raw,
-                        bounds = copyRect,
+                        bounds = Rect(rect),
                         source = MatchSource.NODE,
-                        clickableNode = clickable
+                        clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
                     )
                 }
+            }
+        }
+        return null
+    }
+
+    /**
+     * 区域双保险查找：先查区域内无障碍节点（<2ms），未命中则只裁剪该局部区域跑极速 OCR（~35ms）
+     */
+    internal suspend fun findInRegion(
+        region: PctRegion,
+        keywords: List<String>,
+        excludeContaining: List<String> = emptyList()
+    ): TargetMatch? {
+        findNodeInRegion(region, keywords, excludeContaining)?.let { return it }
+
+        val (screenW, screenH) = getScreenSize()
+        val targetRect = region.toScreenRect(screenW, screenH)
+        val lines = overlayManager.withHiddenIfOverlaps(targetRect) {
+            ocrHelper.captureAndRecognizeRegion(
+                service = this@AdHelperAccessibilityService,
+                region = region,
+                excludeRect = overlayManager.getBoundsOnScreen()
+            )
+        }
+        return ocrHelper.findMatchInLines(lines, keywords, excludeContaining)
+    }
+
+    /**
+     * 抓取单帧完整 Bitmap，供同一个循环周期内按需裁剪多个小区域（避免重复截屏耗费限频额度）
+     */
+    internal suspend fun captureFrameBitmap(): Bitmap? {
+        return overlayManager.withHiddenIfOverlaps(null) {
+            ocrHelper.captureScreenBitmap(this@AdHelperAccessibilityService)
+        }
+    }
+
+    internal suspend fun ocrFindInFrame(
+        frame: Bitmap,
+        region: PctRegion,
+        keywords: List<String>,
+        excludeContaining: List<String> = emptyList()
+    ): TargetMatch? {
+        val lines = ocrHelper.recognizeInRegion(
+            fullBitmap = frame,
+            region = region,
+            excludeRect = overlayManager.getBoundsOnScreen()
+        )
+        return ocrHelper.findMatchInLines(lines, keywords, excludeContaining)
+    }
+
+    /**
+     * 查找右上角直播间/激励广告的「关闭 / ×」控件节点（对齐 qishuiAScriptProject 的 Selector("关闭") 兜底）
+     */
+    internal fun findTopRightCloseNode(rewardBounds: Rect? = null): TargetMatch? {
+        val nodes = collectAllVisibleNodes()
+        if (nodes.isEmpty()) return null
+        val (screenW, screenH) = getScreenSize()
+        val rect = Rect()
+
+        // 1) 优先找 label="领取成功，关闭" 或 desc="关闭"
+        for (node in nodes) {
+            val desc = node.contentDescription?.toString().orEmpty()
+            val text = node.text?.toString().orEmpty()
+            val combined = "$desc $text"
+            if ((combined.contains("关闭") || combined.contains("跳过")) && !combined.contains("秒后")) {
+                node.getBoundsInScreen(rect)
+                if (rect.left >= (screenW * 0.55f).toInt() && rect.bottom <= (screenH * 0.16f).toInt() && rect.width() > 8) {
+                    return TargetMatch(
+                        matchedKeyword = "关闭节点",
+                        fullText = combined.trim(),
+                        bounds = Rect(rect),
+                        source = MatchSource.NODE,
+                        clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
+                    )
+                }
+            }
+        }
+
+        // 2) 若已知「领取成功」文字框，找其右侧同高度小图标
+        if (rewardBounds != null) {
+            for (node in nodes) {
+                node.getBoundsInScreen(rect)
+                if (rect.width() in 14..150 &&
+                    rect.height() in 14..140 &&
+                    rect.left >= rewardBounds.right - 16 &&
+                    abs(rect.centerY() - rewardBounds.centerY()) <= 70 &&
+                    (node.isClickable || node.childCount == 0)
+                ) {
+                    return TargetMatch(
+                        matchedKeyword = "右侧×节点",
+                        fullText = "领取成功右侧×",
+                        bounds = Rect(rect),
+                        source = MatchSource.NODE,
+                        clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
+                    )
+                }
+            }
+        }
+
+        // 3) 右上角可点击小图标
+        for (node in nodes) {
+            node.getBoundsInScreen(rect)
+            val cls = node.className?.toString().orEmpty()
+            if ((node.isClickable || cls.endsWith("ImageView") || cls.endsWith("Button")) &&
+                rect.left >= (screenW * 0.76f).toInt() &&
+                rect.top >= 12 &&
+                rect.bottom <= (screenH * 0.14f).toInt() &&
+                rect.width() in 20..160 &&
+                rect.height() in 20..150
+            ) {
+                return TargetMatch(
+                    matchedKeyword = "右上角×图标",
+                    fullText = cls.substringAfterLast('.'),
+                    bounds = Rect(rect),
+                    source = MatchSource.NODE,
+                    clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
+                )
+            }
+        }
+        return null
+    }
+
+    /**
+     * 专用于直播间的右上角关闭按钮查找：严格只匹配 desc/text="关闭" 且位于屏幕最右侧 85% 以外（绝不触碰主播「关注」或观众头像）
+     */
+    internal fun findLiveRoomCloseNode(): TargetMatch? {
+        val nodes = collectAllVisibleNodes()
+        if (nodes.isEmpty()) return null
+        val (screenW, screenH) = getScreenSize()
+        val rect = Rect()
+
+        for (node in nodes) {
+            val desc = node.contentDescription?.toString()?.trim().orEmpty()
+            val text = node.text?.toString()?.trim().orEmpty()
+            val combined = "$desc $text"
+            if (combined.contains("关注")) continue
+            if (desc == "关闭" || text == "关闭" || combined.contains("关闭直播")) {
+                node.getBoundsInScreen(rect)
+                if (rect.left >= (screenW * 0.84f).toInt() &&
+                    rect.bottom <= (screenH * 0.15f).toInt() &&
+                    rect.width() in 16..150
+                ) {
+                    return TargetMatch(
+                        matchedKeyword = "关闭",
+                        fullText = combined.trim(),
+                        bounds = Rect(rect),
+                        source = MatchSource.NODE,
+                        clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
+                    )
+                }
+            }
+        }
+        return null
+    }
+
+    internal fun findTopRightGoldCoinNode(): TargetMatch? {
+        val nodes = collectAllVisibleNodes()
+        if (nodes.isEmpty()) return null
+        val (screenW, screenH) = getScreenSize()
+        val rect = Rect()
+
+        for (node in nodes) {
+            node.getBoundsInScreen(rect)
+            if (rect.left >= (screenW * 0.75f).toInt() &&
+                rect.right <= (screenW * 0.88f).toInt() &&
+                rect.top >= (screenH * 0.035f).toInt() &&
+                rect.bottom <= (screenH * 0.095f).toInt() &&
+                rect.width() in 24..160 &&
+                rect.height() in 24..160
+            ) {
+                return TargetMatch(
+                    matchedKeyword = "右上角金币图标",
+                    fullText = "顶部金币入口",
+                    bounds = Rect(rect),
+                    source = MatchSource.NODE,
+                    clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
+                )
             }
         }
         return null
@@ -330,157 +490,33 @@ class AdHelperAccessibilityService : AccessibilityService() {
         return null
     }
 
-    internal fun findAdCloseNodeTarget(
-        rewardBounds: Rect?,
-        screenW: Int,
-        screenH: Int
-    ): TargetMatch? {
-        val nodes = collectAllVisibleNodes()
-        if (nodes.isEmpty()) return null
-        val rect = Rect()
-
-        for (node in nodes) {
-            val label = (node.contentDescription?.toString() ?: "") + " " + (node.text?.toString() ?: "")
-            if (label.contains("领取成功") && label.contains("关闭") && !label.contains("秒后")) {
-                node.getBoundsInScreen(rect)
-                if (rect.width() > 6 && rect.height() > 6) {
-                    return TargetMatch(
-                        matchedKeyword = "领取成功，关闭",
-                        fullText = label.trim(),
-                        bounds = Rect(rect),
-                        source = MatchSource.NODE,
-                        clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
-                    )
-                }
-            }
-        }
-
-        if (rewardBounds != null) {
-            for (node in nodes) {
-                node.getBoundsInScreen(rect)
-                if (rect.width() in 14..150 &&
-                    rect.height() in 14..140 &&
-                    rect.left >= rewardBounds.right - 16 &&
-                    abs(rect.centerY() - rewardBounds.centerY()) <= 70
-                ) {
-                    if (node.isClickable || node.childCount == 0) {
-                        return TargetMatch(
-                            matchedKeyword = "领取成功右侧×",
-                            fullText = "右侧关闭按钮",
-                            bounds = Rect(rect),
-                            source = MatchSource.NODE,
-                            clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
-                        )
-                    }
-                }
-            }
-        }
-
-        val minLeft = (screenW * 0.75f).toInt()
-        val maxBottom = (screenH * 0.16f).toInt()
-        for (node in nodes) {
-            node.getBoundsInScreen(rect)
-            val className = node.className?.toString().orEmpty()
-            val isSmallIcon = (node.isClickable || className.endsWith("ImageView")) &&
-                rect.left >= minLeft &&
-                rect.top >= 12 &&
-                rect.bottom <= maxBottom &&
-                rect.width() in 20..160 &&
-                rect.height() in 20..150
-            if (isSmallIcon) {
-                return TargetMatch(
-                    matchedKeyword = "右上角×节点",
-                    fullText = className.substringAfterLast('.'),
-                    bounds = Rect(rect),
-                    source = MatchSource.NODE,
-                    clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
-                )
-            }
-        }
-        return null
-    }
-
-    /**
-     * 匹配播放页右上角（搜索放大镜左侧、与「模式选择」同行）的金币福利图标节点
-     */
-    internal fun findTopRightGoldCoinNode(screenW: Int, screenH: Int): TargetMatch? {
-        val nodes = collectAllVisibleNodes()
-        if (nodes.isEmpty()) return null
-        val rect = Rect()
-        val minLeft = (screenW * 0.75f).toInt()
-        val maxRight = (screenW * 0.88f).toInt()
-        val minTop = (screenH * 0.035f).toInt()
-        val maxBottom = (screenH * 0.095f).toInt()
-
-        for (node in nodes) {
-            node.getBoundsInScreen(rect)
-            if (rect.left >= minLeft &&
-                rect.right <= maxRight &&
-                rect.top >= minTop &&
-                rect.bottom <= maxBottom &&
-                rect.width() in 24..160 &&
-                rect.height() in 24..160
-            ) {
-                return TargetMatch(
-                    matchedKeyword = "右上角金币图标",
-                    fullText = "顶部福利金币入口",
-                    bounds = Rect(rect),
-                    source = MatchSource.NODE,
-                    clickableNode = findClickableSelfOrAncestor(node, screenW, screenH)
-                )
-            }
-        }
-        return null
-    }
-
-    internal suspend fun captureScreenOcrLines(): List<OcrLineRecord> {
-        return overlayManager.withTemporarilyHidden {
-            ocrHelper.captureAndRecognize(
-                service = this@AdHelperAccessibilityService,
-                excludeRect = overlayManager.getBoundsOnScreen()
-            )
-        }
-    }
-
-    internal suspend fun performSmartTap(
+    internal suspend fun safeTap(
         match: TargetMatch,
-        reason: String,
-        delayMs: Long,
-        preferNodeAction: Boolean = false
+        desc: String,
+        preDelayMs: Long = 220L
     ): Boolean {
-        if (delayMs > 0L) {
-            delay(delayMs)
-        }
-
-        if (preferNodeAction && match.clickableNode != null) {
-            val nodeClicked = runCatching {
+        if (preDelayMs > 0L) delay(preDelayMs)
+        val ok = dispatchHumanTapAtBounds(match.bounds, desc)
+        if (!ok && match.clickableNode != null) {
+            val fallback = runCatching {
                 match.clickableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             }.getOrDefault(false)
-            if (nodeClicked) {
-                AppLogBus.info("已通过节点快速点击[$reason]")
-                return true
-            }
+            AppLogBus.info("手势回退节点点击 [$desc] -> $fallback")
+            return fallback
         }
-
-        val dispatched = dispatchHumanTapAtBounds(match.bounds, reason)
-        if (!dispatched && match.clickableNode != null) {
-            val fallbackOk = runCatching {
-                match.clickableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            }.getOrDefault(false)
-            AppLogBus.info("手势被拦截，已回退无障碍节点点击[$reason] -> result=$fallbackOk")
-            return fallbackOk
-        }
-        return dispatched
+        return ok
     }
 
-    internal suspend fun performHumanTap(bounds: Rect, reason: String, delayMs: Long): Boolean {
-        if (delayMs > 0L) {
-            delay(delayMs)
-        }
-        return dispatchHumanTapAtBounds(bounds, reason)
+    internal suspend fun safeTapRect(
+        bounds: Rect,
+        desc: String,
+        preDelayMs: Long = 220L
+    ): Boolean {
+        if (preDelayMs > 0L) delay(preDelayMs)
+        return dispatchHumanTapAtBounds(bounds, desc)
     }
 
-    private suspend fun dispatchHumanTapAtBounds(bounds: Rect, reason: String): Boolean {
+    private suspend fun dispatchHumanTapAtBounds(bounds: Rect, desc: String): Boolean {
         val (screenW, screenH) = getScreenSize()
         val point = Humanizer.computeTapPoint(bounds, screenW, screenH)
         val gesture = Humanizer.buildHumanTapGesture(point)
@@ -504,17 +540,17 @@ class AdHelperAccessibilityService : AccessibilityService() {
             }
         }
         if (dispatched) {
-            AppLogBus.info("已点击[$reason] -> (${point.x.toInt()}, ${point.y.toInt()})")
+            AppLogBus.info("点击 [$desc] -> (${point.x.toInt()}, ${point.y.toInt()})")
         } else {
-            AppLogBus.warn("手势点击未生效[$reason]（请检查开发者选项「USB调试(安全设置)」）")
+            AppLogBus.warn("点击未生效 [$desc]（请检查开发者选项「USB调试(安全设置)」）")
         }
         return dispatched
     }
 
-    internal suspend fun performGlobalBack(reason: String, fastMode: Boolean = true) {
-        delay(Humanizer.randomBackDelayMs(fastMode))
+    internal suspend fun performGlobalBack(reason: String) {
+        delay(260L)
         val ok = performGlobalAction(GLOBAL_ACTION_BACK)
-        AppLogBus.info("执行全局返回[$reason] -> result=$ok")
+        AppLogBus.info("全局返回 [$reason] -> $ok")
     }
 
     companion object {

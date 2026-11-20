@@ -17,9 +17,9 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="畅听自动化助手 v1.3 精准连看版"
+            android:text="畅听自动化助手 v2.0"
             android:textColor="@color/text_primary"
-            android:textSize="21sp"
+            android:textSize="22sp"
             android:textStyle="bold" />
 
         <TextView
@@ -27,7 +27,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:layout_marginBottom="14dp"
-            android:text="广告内直接无缝连看 · 零截屏节点极速快检 · 自动静音与防误跳"
+            android:text="局部小区域极速裁剪 OCR · 确定性两步连看闭环 · 视频与直播广告双兼容"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
@@ -57,7 +57,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="1. 手机环境与权限自检"
+                        android:text="1. 权限自检"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:textStyle="bold" />
@@ -68,7 +68,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:minHeight="36dp"
-                        android:text="受限设置开启说明"
+                        android:text="受限设置说明"
                         android:textSize="12sp" />
                 </LinearLayout>
 
@@ -156,7 +156,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 2. 任务控制卡片 -->
+        <!-- 2. 执行控制台卡片 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -202,7 +202,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="看完第 1 条后将在弹窗内直接点「领取奖励」无缝连看下一条，直至达到设定轮数。"
+                    android:text="核心流程：自动跳开屏 → 进首条广告（或手点任意广告）→ 循环[点右上领取成功 → 点中间领取奖励]极速连看。"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
@@ -211,7 +211,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="48dp"
                     android:layout_marginTop="12dp"
-                    android:text="一键极速连看（自动拉起汽水）"
+                    android:text="一键启动极速连看"
                     android:textSize="15sp"
                     android:textStyle="bold" />
 
@@ -227,7 +227,7 @@
                         android:layout_width="0dp"
                         android:layout_height="44dp"
                         android:layout_weight="1"
-                        android:text="开启常驻悬浮窗（去汽水内点 ▶）"
+                        android:text="挂起悬浮窗（在汽水内点 ▶ 接管）"
                         android:textSize="12.5sp" />
 
                     <com.google.android.material.button.MaterialButton
@@ -244,7 +244,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 3. 策略与本地规则配置卡片 -->
+        <!-- 3. 精简核心配置卡片 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -263,44 +263,22 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="3. 连看轮数与速度策略"
+                    android:text="3. 循环参数配置"
                     android:textColor="@color/text_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="10dp"
-                    android:text="支持连续连看 1-30 轮攒多日免费畅听；默认 4 轮（约 2 天畅听时长）。"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="目标应用包名">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etTargetPackage"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="text"
-                        android:singleLine="true" />
-                </com.google.android.material.textfield.TextInputLayout>
-
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="10dp"
                     android:orientation="horizontal">
 
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:hint="连续观看广告轮数 (1-30)">
+                        android:hint="连看次数 (1-50)">
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/etMaxRounds"
@@ -315,7 +293,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
                         android:layout_weight="1"
-                        android:hint="单轮超时秒数 (45-120)">
+                        android:hint="单轮等待上限秒数 (30-90)">
 
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/etSingleTimeoutSec"
@@ -327,12 +305,12 @@
                 </LinearLayout>
 
                 <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switchFastMode"
+                    android:id="@+id/switchInfiniteMode"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:checked="true"
-                    android:text="极速响应模式（0.3~0.7s 快速点关与连看，跳过冗余截屏）"
+                    android:checked="false"
+                    android:text="无限循环模式（一直连看到当日额度用完自动退出）"
                     android:textColor="@color/text_primary"
                     android:textSize="13.5sp" />
 
@@ -345,78 +323,18 @@
                     android:textColor="@color/text_primary"
                     android:textSize="13.5sp" />
 
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switchStopOnTomorrow"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:checked="false"
-                    android:text="仅领满今日即停（关闭则继续连看提前攒明日/多日时长）"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13.5sp" />
-
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:hint="领时长入口关键词（| 分隔）">
+                    android:layout_marginTop="4dp"
+                    android:hint="目标应用包名">
 
                     <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etEntryKeywords"
+                        android:id="@+id/etTargetPackage"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:inputType="text" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="今日已领满特征词（| 分隔）">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etUnlockedKeywords"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="text" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="单条广告奖励发放完成词（| 分隔）">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etRewardDoneKeywords"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="text" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="弹窗内直接连看下一轮按钮词（| 分隔）">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etNextAdKeywords"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="text" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="无视频/频控中止提示词（| 分隔）">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etNoVideoKeywords"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="text" />
+                        android:inputType="text"
+                        android:singleLine="true" />
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <LinearLayout
@@ -431,7 +349,7 @@
                         android:layout_width="0dp"
                         android:layout_height="42dp"
                         android:layout_weight="1"
-                        android:text="保存规则配置" />
+                        android:text="保存配置" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnResetConfig"
@@ -445,7 +363,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 4. 实时诊断日志卡片 -->
+        <!-- 4. 实时日志卡片 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -471,7 +389,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="4. 实时画面识别与状态日志"
+                        android:text="4. 运行日志"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:textStyle="bold" />

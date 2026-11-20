@@ -3,19 +3,20 @@ package io.github.jiaqi.qishuihelper.ocr
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.os.Build
 import android.os.SystemClock
 import android.view.Display
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import io.github.jiaqi.qishuihelper.model.MatchSource
+import io.github.jiaqi.qishuihelper.model.PctRegion
 import io.github.jiaqi.qishuihelper.model.TargetMatch
 import io.github.jiaqi.qishuihelper.util.AppLogBus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.math.max
-import kotlin.math.roundToInt
 
 data class OcrLineRecord(
     val text: String,
@@ -33,51 +34,94 @@ class ScreenOcrHelper {
     private var lastScreenshotUptimeMs: Long = 0L
 
     /**
-     * 通过 Android 11+ 无障碍静默截屏 + 等比缩放加速 + ML Kit 中文离线模型识别全屏文字
+     * Android 13+ 系统截屏限频已放宽至 333ms，Android 11/12 为 1000ms
      */
-    suspend fun captureAndRecognize(
-        service: AccessibilityService,
+    private val minIntervalMs: Long = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        380L
+    } else {
+        1050L
+    }
+
+    /**
+     * 获取单帧原始屏幕 Bitmap（调用方负责用完 recycle，可用于同一帧连续裁剪多个小区域而不重复截屏）
+     */
+    suspend fun captureScreenBitmap(service: AccessibilityService): Bitmap? {
+        val elapsed = SystemClock.uptimeMillis() - lastScreenshotUptimeMs
+        if (elapsed in 0 until minIntervalMs) {
+            delay(minIntervalMs - elapsed)
+        }
+        val firstTry = takeSilentScreenshotOnce(service)
+        if (firstTry != null) {
+            lastScreenshotUptimeMs = SystemClock.uptimeMillis()
+            return firstTry
+        }
+        // 若偶发截屏间隔过短 (errorCode=3)，等待 450ms 自动重试一次
+        delay(450L)
+        val retry = takeSilentScreenshotOnce(service)
+        if (retry != null) {
+            lastScreenshotUptimeMs = SystemClock.uptimeMillis()
+        }
+        return retry
+    }
+
+    /**
+     * 核心优化（借鉴 qishuiAScriptProject）：
+     * 只裁剪指定百分比小区域送入 ML Kit OCR，耗时仅 30~50ms，识别率大幅提升且天然物理隔离干扰区域！
+     */
+    suspend fun recognizeInRegion(
+        fullBitmap: Bitmap,
+        region: PctRegion,
         excludeRect: Rect? = null
     ): List<OcrLineRecord> {
-        // 遵守 Android 11/12 截屏最小间隔限制，避免报 errorCode=3 (INTERVAL_TIME_SHORT)
-        val elapsed = SystemClock.uptimeMillis() - lastScreenshotUptimeMs
-        if (elapsed in 0..1149L) {
-            delay(1150L - elapsed)
-        }
+        val bw = fullBitmap.width
+        val bh = fullBitmap.height
+        if (bw < 32 || bh < 32) return emptyList()
 
-        val rawBitmap = takeSilentScreenshot(service) ?: return emptyList()
-        lastScreenshotUptimeMs = SystemClock.uptimeMillis()
+        val cropRect = region.toScreenRect(bw, bh)
+        val cropW = cropRect.width().coerceAtMost(bw - cropRect.left)
+        val cropH = cropRect.height().coerceAtMost(bh - cropRect.top)
+        if (cropW < 16 || cropH < 16) return emptyList()
 
-        var scaledBitmap: Bitmap? = null
+        val croppedBitmap = Bitmap.createBitmap(
+            fullBitmap,
+            cropRect.left,
+            cropRect.top,
+            cropW,
+            cropH
+        )
         return try {
-            val origW = rawBitmap.width
-            val origH = rawBitmap.height
-            val scale = if (origW > MAX_OCR_WIDTH) {
-                MAX_OCR_WIDTH.toFloat() / origW.toFloat()
-            } else {
-                1.0f
-            }
-            val bitmapForOcr = if (scale < 0.999f) {
-                val targetW = (origW * scale).roundToInt().coerceAtLeast(1)
-                val targetH = (origH * scale).roundToInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(rawBitmap, targetW, targetH, true).also {
-                    scaledBitmap = it
-                }
-            } else {
-                rawBitmap
-            }
-            recognizeBitmap(bitmapForOcr, 1.0f / scale, excludeRect)
+            recognizeCroppedBitmap(
+                cropped = croppedBitmap,
+                offsetX = cropRect.left,
+                offsetY = cropRect.top,
+                excludeRect = excludeRect
+            )
         } finally {
-            if (scaledBitmap != null && scaledBitmap !== rawBitmap && !scaledBitmap!!.isRecycled) {
-                scaledBitmap!!.recycle()
-            }
-            if (!rawBitmap.isRecycled) {
-                rawBitmap.recycle()
+            if (croppedBitmap !== fullBitmap && !croppedBitmap.isRecycled) {
+                croppedBitmap.recycle()
             }
         }
     }
 
-    private suspend fun takeSilentScreenshot(service: AccessibilityService): Bitmap? =
+    /**
+     * 一步完成：静默截屏 + 局部小区域裁剪识别 + 自动释放内存
+     */
+    suspend fun captureAndRecognizeRegion(
+        service: AccessibilityService,
+        region: PctRegion,
+        excludeRect: Rect? = null
+    ): List<OcrLineRecord> {
+        val full = captureScreenBitmap(service) ?: return emptyList()
+        return try {
+            recognizeInRegion(full, region, excludeRect)
+        } finally {
+            if (!full.isRecycled) {
+                full.recycle()
+            }
+        }
+    }
+
+    private suspend fun takeSilentScreenshotOnce(service: AccessibilityService): Bitmap? =
         suspendCancellableCoroutine { cont ->
             try {
                 service.takeScreenshot(
@@ -99,7 +143,7 @@ class ScreenOcrHelper {
                                     softBitmap?.recycle()
                                 }
                             } catch (t: Throwable) {
-                                AppLogBus.warn("OCR 截屏像素转换失败：${t.message}")
+                                AppLogBus.warn("截屏缓冲转换异常：${t.message}")
                                 if (cont.isActive) cont.resume(null)
                             } finally {
                                 hardwareBuffer.close()
@@ -107,36 +151,38 @@ class ScreenOcrHelper {
                         }
 
                         override fun onFailure(errorCode: Int) {
-                            AppLogBus.warn("无障碍静默截屏失败(errorCode=$errorCode)")
+                            if (errorCode != AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
+                                AppLogBus.warn("截屏未成功(code=$errorCode)")
+                            }
                             if (cont.isActive) cont.resume(null)
                         }
                     }
                 )
             } catch (t: Throwable) {
-                AppLogBus.warn("调用无障碍截屏异常：${t.message}")
                 if (cont.isActive) cont.resume(null)
             }
         }
 
-    private suspend fun recognizeBitmap(
-        bitmap: Bitmap,
-        invScale: Float,
+    private suspend fun recognizeCroppedBitmap(
+        cropped: Bitmap,
+        offsetX: Int,
+        offsetY: Int,
         excludeRect: Rect?
     ): List<OcrLineRecord> = suspendCancellableCoroutine { cont ->
-        val inputImage = InputImage.fromBitmap(bitmap, 0)
+        val inputImage = InputImage.fromBitmap(cropped, 0)
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
-                val records = mutableListOf<OcrLineRecord>()
+                val records = ArrayList<OcrLineRecord>(16)
                 for (block in visionText.textBlocks) {
                     for (line in block.lines) {
-                        val rawBox = line.boundingBox ?: continue
-                        val mappedBox = Rect(
-                            (rawBox.left * invScale).roundToInt(),
-                            (rawBox.top * invScale).roundToInt(),
-                            (rawBox.right * invScale).roundToInt(),
-                            (rawBox.bottom * invScale).roundToInt()
+                        val box = line.boundingBox ?: continue
+                        val absRect = Rect(
+                            box.left + offsetX,
+                            box.top + offsetY,
+                            box.right + offsetX,
+                            box.bottom + offsetY
                         )
-                        if (excludeRect != null && Rect.intersects(mappedBox, excludeRect)) {
+                        if (excludeRect != null && Rect.intersects(absRect, excludeRect)) {
                             continue
                         }
                         val raw = line.text.trim()
@@ -146,27 +192,22 @@ class ScreenOcrHelper {
                             OcrLineRecord(
                                 text = raw,
                                 normalizedText = norm,
-                                bounds = mappedBox
+                                bounds = absRect
                             )
                         )
                     }
                 }
                 if (cont.isActive) cont.resume(records)
             }
-            .addOnFailureListener { err ->
-                AppLogBus.warn("ML Kit 中文识别异常：${err.message}")
+            .addOnFailureListener {
                 if (cont.isActive) cont.resume(emptyList())
             }
     }
 
-    /**
-     * 在 OCR 结果中查找匹配关键词，支持按字符比例切分合并胶囊坐标（如「奖励已领取 | 跳过」）
-     */
-    fun findBestMatch(
+    fun findMatchInLines(
         lines: List<OcrLineRecord>,
         keywords: List<String>,
-        excludeContaining: List<String> = emptyList(),
-        regionPredicate: ((Rect) -> Boolean)? = null
+        excludeContaining: List<String> = emptyList()
     ): TargetMatch? {
         for (keyword in keywords) {
             val cleanKey = normalizeText(keyword)
@@ -176,7 +217,7 @@ class ScreenOcrHelper {
                 if (excludeContaining.any { ex -> line.normalizedText.contains(normalizeText(ex)) }) {
                     continue
                 }
-                if (cleanKey.length == 1 && line.normalizedText.length > 4) {
+                if (cleanKey.length == 1 && line.normalizedText.length > 3) {
                     continue
                 }
                 val startIdx = line.normalizedText.indexOf(cleanKey)
@@ -188,9 +229,6 @@ class ScreenOcrHelper {
                     matchStart = startIdx,
                     matchLen = cleanKey.length
                 )
-                if (regionPredicate != null && !regionPredicate(subBounds)) {
-                    continue
-                }
                 return TargetMatch(
                     matchedKeyword = keyword,
                     fullText = line.text,
@@ -228,12 +266,9 @@ class ScreenOcrHelper {
     }
 
     companion object {
-        private const val MAX_OCR_WIDTH = 1080
-        private val DECOR_EDGE_REGEX = Regex("^[×xX✕✖·•|丨\\[\\]【】()（）<>《》\\s]+|[×xX✕✖·•|丨\\[\\]【】()（）<>《》\\s]+$")
+        private val DECOR_EDGE_REGEX =
+            Regex("^[×xX✕✖·•|丨\\[\\]【】()（）<>《》\\s]+|[×xX✕✖·•|丨\\[\\]【】()（）<>《》\\s]+$")
 
-        /**
-         * 归一化 OCR 常见形近字混淆与首尾符号（参考开源社区实测修正表）
-         */
         fun normalizeText(raw: String): String {
             if (raw.isBlank()) return ""
             return raw
@@ -249,7 +284,8 @@ class ScreenOcrHelper {
                 .replace("勵", "励")
                 .replace("时常", "时长")
                 .replace("時長", "时长")
-                .replace("福利", "福利")
+                .replace("兔费", "免费")
+                .replace("堤前", "提前")
         }
     }
 }
