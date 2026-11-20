@@ -96,9 +96,10 @@ class TaskStateMachine(
                         }
 
                         // 2) 关闭青少年模式/升级提示等中性遮挡弹窗
-                        findHybrid(config.neutralDismissKeywords, ocrLines)?.let { popup ->
-                            AppLogBus.info("检测到遮挡弹窗「${popup.fullText}」，先予以关闭")
-                            host.performHumanTap(popup.bounds, "关闭遮挡弹窗:${popup.matchedKeyword}")
+                        val neutralPopup = findHybrid(config.neutralDismissKeywords, ocrLines)
+                        if (neutralPopup != null) {
+                            AppLogBus.info("检测到遮挡弹窗「${neutralPopup.fullText}」，先予以关闭")
+                            host.performHumanTap(neutralPopup.bounds, "关闭遮挡弹窗:${neutralPopup.matchedKeyword}")
                             delay(1800L)
                             continue
                         }
@@ -347,11 +348,12 @@ class TaskStateMachine(
                         val ocrLines = host.captureScreenOcrLines()
 
                         // 1) 关闭第 1 条广告后常弹出「再看一个，解锁全天免费畅听」
-                        findHybrid(
+                        val nextBtn = findHybrid(
                             keywords = config.nextAdKeywords,
                             ocrLines = ocrLines,
                             excludeContaining = listOf("秒后")
-                        )?.let { nextBtn ->
+                        )
+                        if (nextBtn != null) {
                             if (currentRound < config.maxRounds) {
                                 AppLogBus.info("复核阶段发现连看激励弹窗：「${nextBtn.fullText}」，继续第 ${currentRound + 1} 轮")
                                 host.performHumanTap(nextBtn.bounds, "二段续看:${nextBtn.matchedKeyword}")

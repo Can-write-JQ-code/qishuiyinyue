@@ -26,17 +26,27 @@ jobs:
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           echo "Using Android SDK at: $SDK_ROOT"
           echo "sdk.dir=$SDK_ROOT" > local.properties
-          if [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-            yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          mkdir -p "$SDK_ROOT/licenses"
+          printf "\n24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n84831b9409646a918e30573bab4c9c91346d8abd\n" >> "$SDK_ROOT/licenses/android-sdk-license"
+          SDKMGR=$(find "$SDK_ROOT" -name sdkmanager -type f 2>/dev/null | head -n 1 || true)
+          if [ -n "$SDKMGR" ]; then
+            yes | "$SDKMGR" --licenses > /dev/null || true
           fi
 
-      - name: Setup Gradle 8.9
+      - name: Setup Gradle 8.10.2
         uses: gradle/actions/setup-gradle@v6.4.1
         with:
-          gradle-version: "8.9"
+          gradle-version: "8.10.2"
 
       - name: Build Debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        run: |
+          if ! gradle :app:assembleDebug > build.log 2>&1; then
+            cat build.log
+            ERR_MSG=$(tail -n 90 build.log | python3 -c 'import sys; s=sys.stdin.read(); print(s.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))')
+            echo "::error title=Gradle Build Error::${ERR_MSG}"
+            exit 1
+          fi
+          cat build.log
 
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/qishui-ad-helper-debug.apk
