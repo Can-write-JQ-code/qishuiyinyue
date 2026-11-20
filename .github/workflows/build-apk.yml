@@ -13,42 +13,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6.3.0
         with:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses
-        run: yes | sdkmanager --licenses > /dev/null || true
+      - name: Configure Preinstalled Android SDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "Using Android SDK at: $SDK_ROOT"
+          echo "sdk.dir=$SDK_ROOT" > local.properties
+          if [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          fi
 
       - name: Setup Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6.4.1
         with:
           gradle-version: "8.9"
 
       - name: Build Debug APK
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Rename APK for clarity
+      - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/qishui-ad-helper-debug.apk
 
       - name: Upload Debug APK Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: qishui-ad-helper-debug-apk
           path: app/build/outputs/apk/debug/qishui-ad-helper-debug.apk
 
       - name: Publish APK to GitHub Releases
-        continue-on-error: true
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: "畅听自动化助手 Debug APK (Build #${{ github.run_number }})"
-          body: "自动构建产物：下载下方 `qishui-ad-helper-debug.apk` 发送至 Android 11+ 手机即可安装使用。"
-          files: app/build/outputs/apk/debug/qishui-ad-helper-debug.apk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v1.0.${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" \
+            app/build/outputs/apk/debug/qishui-ad-helper-debug.apk \
+            --title "畅听自动化助手 Debug APK (Build #${GITHUB_RUN_NUMBER})" \
+            --notes "自动构建完成：直接点击下方 \`qishui-ad-helper-debug.apk\` 下载到 Android 11+ 手机安装即可。" || true
