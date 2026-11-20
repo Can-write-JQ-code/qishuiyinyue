@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">畅听自动化助手</string>
+    <string name="accessibility_service_label">畅听自动化无障碍引擎</string>
+    <string name="accessibility_service_description">仅在您手动点击启动任务后运行：用于识别激励视频倒计时、防摇一摇误跳自动返回以及静音守护。空闲状态下完全休眠，不收集任何个人数据。</string>
+</resources>

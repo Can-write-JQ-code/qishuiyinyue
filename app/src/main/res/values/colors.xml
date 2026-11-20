@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand_primary">#0F9D76</color>
+    <color name="brand_primary_dark">#0A7558</color>
+    <color name="brand_secondary">#2563EB</color>
+    <color name="danger_red">#DC2626</color>
+    <color name="warn_amber">#D97706</color>
+    <color name="ok_green">#16A34A</color>
+    <color name="bg_page">#F4F6F9</color>
+    <color name="bg_card">#FFFFFF</color>
+    <color name="bg_log">#111827</color>
+    <color name="text_primary">#1F2937</color>
+    <color name="text_secondary">#6B7280</color>
+    <color name="text_log">#D1FAE5</color>
+    <color name="white">#FFFFFF</color>
+</resources>
