@@ -3,6 +3,9 @@ name: Build Android Debug APK
 on:
   push:
     branches: [ "main", "master" ]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
